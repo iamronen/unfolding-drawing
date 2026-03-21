@@ -51,6 +51,7 @@ import {
   type LineSegmentWithPositions,
 } from './lib/lineSegmentHit';
 import { recordTransformation } from './lib/recordTransformation';
+import { getRepeaterEchoSegmentIndexPairs } from './lib/repeaterLineSegmentPairs';
 import { chooseParentForSplitPlace } from './lib/splitLineHierarchy';
 import {
   availableTransforms as getAvailableTransforms,
@@ -84,6 +85,7 @@ const CROSSHAIR_SIZE = 10;
 const PENDING_SPLIT_PLACE = '__pending_split_place__' as PlaceId;
 /** Sentinel id for the draggable preview place during "Add place on axis". */
 const PENDING_AXIS_PLACE = '__pending_axis_place__' as PlaceId;
+const PENDING_AXIS_PLACE_ECHO = '__pending_axis_place_echo__' as PlaceId;
 /** Sentinel id for the draggable preview place during "Add place on circular field". */
 const PENDING_CIRCULAR_FIELD_PLACE = '__pending_cf_place__' as PlaceId;
 
@@ -1685,6 +1687,26 @@ const App: Component = () => {
             absY: previewPy,
             absWorldAngle: worldAngle,
           } as (typeof result)[number]);
+          const isMirror =
+            (axis as { isMirror?: number | null }).isMirror === 1;
+          if (isMirror && perp !== 0) {
+            const perpEcho = -perp;
+            const pxEcho = parentAbs.x + d * cosA + perpEcho * -sinA;
+            const pyEcho = parentAbs.y + d * sinA + perpEcho * cosA;
+            result.push({
+              id: PENDING_AXIS_PLACE_ECHO,
+              parentId: null,
+              parentAxisId: null,
+              x: 0,
+              y: 0,
+              angle: null,
+              name: null,
+              isScaffolding: 1,
+              absX: pxEcho,
+              absY: pyEcho,
+              absWorldAngle: worldAngle,
+            } as (typeof result)[number]);
+          }
         }
       }
     }
@@ -2392,7 +2414,7 @@ const App: Component = () => {
       gs === 'execute' &&
       tc === 'addPlaceOnAxis' &&
       paPlace &&
-      hit?.id === PENDING_AXIS_PLACE
+      (hit?.id === PENDING_AXIS_PLACE || hit?.id === PENDING_AXIS_PLACE_ECHO)
     ) {
       setDraggingPlaceOnAxis(paPlace.axisId);
       return;
@@ -2753,13 +2775,16 @@ const App: Component = () => {
                     ...endingEchoes.slice(0, endIdx),
                   ]
                 : endingEchoes;
-            const n = Math.min(originRotated.length, endRotated.length);
+            const indexPairs = getRepeaterEchoSegmentIndexPairs(
+              originRotated.length,
+              endRotated.length,
+            );
             const lineName = nextLineSegmentName(lineSegments());
             const segNameResult = String1000.from(lineName);
             let firstSegId: LineSegmentId | null = null;
-            for (let i = 0; i < n; i++) {
-              const origEcho = originRotated[i]!;
-              const endEcho = endRotated[i]!;
+            for (const [iO, iE] of indexPairs) {
+              const origEcho = originRotated[iO]!;
+              const endEcho = endRotated[iE]!;
               const endARes = evolu.insert('lineSegmentEnd', {
                 placeId: origEcho.id,
               });
