@@ -111,7 +111,7 @@ export const viewControls = {
 // SVG / canvas visual constants
 export const svg = {
   // Place markers
-  placeUnselectedStroke: '#999999',
+  placeUnselectedStroke: '#aaaaaa',
   placeSelectedStroke: 'darkorange',
   placeParentStroke: '#0ea5e9',
   placeChildStroke: '#10b981',
@@ -121,7 +121,7 @@ export const svg = {
   placeRelationCircleDasharray: '4 4',
 
   // Orientation axis (full thin mid-gray line)
-  orientationAxisStroke: '#999999',
+  orientationAxisStroke: '#aaaaaa',
   orientationAxisStrokeWidth: 1,
   orientationAxisDasharray: 'none',
   orientationAxisFill: 'black',
@@ -154,7 +154,7 @@ export const svg = {
   lineSegmentScaffoldingDasharray: '6 3',
 
   // Circular field (scaffolding: full circle and full radius line)
-  circularFieldScaffoldingStroke: '#999999',
+  circularFieldScaffoldingStroke: '#aaaaaa',
   circularFieldScaffoldingStrokeWidth: 1,
   circularFieldScaffoldingDasharray: 'none',
   circularFieldRadiusLineDasharray: 'none',

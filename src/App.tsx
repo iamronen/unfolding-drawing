@@ -20,6 +20,10 @@ import {
   type ViewportCanvas,
 } from './lib/axisGeometry';
 import {
+  bendCircleFromStoredRowAndChord,
+  bendingOffsetsForSegmentEnd,
+} from './lib/bendingEchoSync';
+import {
   type BendCircle,
   buildBentSegmentPath,
   distanceFromPointToBentPath,
@@ -294,16 +298,14 @@ const App: Component = () => {
       hasBendAtB: !!bendAtB,
       onToggleBendAtA: () => {
         const segmentsList = lineSegments();
-        const group = getLineSegmentsInEchoGroup(segId, segmentsList);
+        const siblingEndIds = getLogicalSiblingEndIds(endAId, segmentsList);
+        const siblingEndIdSet = new Set(siblingEndIds);
         const allPos = lineSegmentsWithPositions();
         if (bendAtA) {
-          const endAIds = group
-            .map((s) => s.endAId)
-            .filter((id): id is LineSegmentEndId => id != null);
           const toRemove = bendingCircularFields().filter(
             (b) =>
               b.lineSegmentEndId != null &&
-              endAIds.includes(b.lineSegmentEndId),
+              siblingEndIdSet.has(b.lineSegmentEndId),
           );
           const deletedEntries = toRemove
             .map((b) => {
@@ -320,31 +322,41 @@ const App: Component = () => {
             evolu.update('bendingCircularField', { id: b.id, isDeleted: true });
           }
         } else {
-          for (const s of group) {
-            if (s.endAId == null) continue;
-            const segPos = allPos.find((p) => p.id === s.id);
+          for (const endId of siblingEndIds) {
+            const existing = bendingCircularFields().find(
+              (b) => b.lineSegmentEndId === endId,
+            );
+            if (existing) continue;
+            const segRow = segmentsList.find(
+              (s) => s.endAId === endId || s.endBId === endId,
+            );
+            if (!segRow) continue;
+            const segPos = allPos.find((p) => p.id === segRow.id);
             if (!segPos) continue;
-            const L =
-              Math.hypot(segPos.x2 - segPos.x1, segPos.y2 - segPos.y1) || 1;
             const dx = segPos.x2 - segPos.x1;
             const dy = segPos.y2 - segPos.y1;
-            const offsetX = radius * (-dy / L);
-            const offsetY = radius * (dx / L);
+            const atEndA = segRow.endAId === endId;
+            const { offsetX, offsetY } = bendingOffsetsForSegmentEnd(
+              dx,
+              dy,
+              radius,
+              atEndA,
+            );
             const res = evolu.insert('bendingCircularField', {
-              lineSegmentEndId: s.endAId,
+              lineSegmentEndId: endId,
               radius,
               offsetX,
               offsetY,
             });
             if (res.ok) {
-              const placeIdA = ends.find((e) => e.id === s.endAId)?.placeId;
+              const placeIdA = ends.find((e) => e.id === endId)?.placeId;
               if (placeIdA != null) {
                 setPendingBendAtEndsAdded((prev) => [
                   ...prev,
                   {
                     id: res.value.id,
                     placeId: placeIdA,
-                    lineSegmentId: s.id,
+                    lineSegmentId: segRow.id,
                     radius,
                   },
                 ]);
@@ -356,16 +368,14 @@ const App: Component = () => {
       },
       onToggleBendAtB: () => {
         const segmentsList = lineSegments();
-        const group = getLineSegmentsInEchoGroup(segId, segmentsList);
+        const siblingEndIds = getLogicalSiblingEndIds(endBId, segmentsList);
+        const siblingEndIdSet = new Set(siblingEndIds);
         const allPos = lineSegmentsWithPositions();
         if (bendAtB) {
-          const endBIds = group
-            .map((s) => s.endBId)
-            .filter((id): id is LineSegmentEndId => id != null);
           const toRemove = bendingCircularFields().filter(
             (b) =>
               b.lineSegmentEndId != null &&
-              endBIds.includes(b.lineSegmentEndId),
+              siblingEndIdSet.has(b.lineSegmentEndId),
           );
           const deletedEntries = toRemove
             .map((b) => {
@@ -382,31 +392,41 @@ const App: Component = () => {
             evolu.update('bendingCircularField', { id: b.id, isDeleted: true });
           }
         } else {
-          for (const s of group) {
-            if (s.endBId == null) continue;
-            const segPos = allPos.find((p) => p.id === s.id);
+          for (const endId of siblingEndIds) {
+            const existing = bendingCircularFields().find(
+              (b) => b.lineSegmentEndId === endId,
+            );
+            if (existing) continue;
+            const segRow = segmentsList.find(
+              (s) => s.endAId === endId || s.endBId === endId,
+            );
+            if (!segRow) continue;
+            const segPos = allPos.find((p) => p.id === segRow.id);
             if (!segPos) continue;
-            const L =
-              Math.hypot(segPos.x2 - segPos.x1, segPos.y2 - segPos.y1) || 1;
             const dx = segPos.x2 - segPos.x1;
             const dy = segPos.y2 - segPos.y1;
-            const offsetX = radius * (dy / L);
-            const offsetY = radius * (-dx / L);
+            const atEndA = segRow.endAId === endId;
+            const { offsetX, offsetY } = bendingOffsetsForSegmentEnd(
+              dx,
+              dy,
+              radius,
+              atEndA,
+            );
             const res = evolu.insert('bendingCircularField', {
-              lineSegmentEndId: s.endBId,
+              lineSegmentEndId: endId,
               radius,
               offsetX,
               offsetY,
             });
             if (res.ok) {
-              const placeIdB = ends.find((e) => e.id === s.endBId)?.placeId;
+              const placeIdB = ends.find((e) => e.id === endId)?.placeId;
               if (placeIdB != null) {
                 setPendingBendAtEndsAdded((prev) => [
                   ...prev,
                   {
                     id: res.value.id,
                     placeId: placeIdB,
-                    lineSegmentId: s.id,
+                    lineSegmentId: segRow.id,
                     radius,
                   },
                 ]);
@@ -1233,6 +1253,87 @@ const App: Component = () => {
     }>;
   }
 
+  /**
+   * All line-segment-end ids that correspond to the same logical endpoint across
+   * repeater echoes (and mirrored copies), even when end A/B orientation flips.
+   */
+  function getLogicalSiblingEndIds(
+    lineSegmentEndId: LineSegmentEndId,
+    segmentsList: ReadonlyArray<{
+      id: LineSegmentId;
+      endAId?: LineSegmentEndId | null;
+      endBId?: LineSegmentEndId | null;
+      repeaterLineSegmentEchoGroupId?: LineSegmentId | null;
+    }>,
+  ): LineSegmentEndId[] {
+    const seg = segmentsList.find(
+      (s) => s.endAId === lineSegmentEndId || s.endBId === lineSegmentEndId,
+    );
+    if (!seg) return [lineSegmentEndId];
+    const endAActive = seg.endAId === lineSegmentEndId;
+    const ownerOtherEndId = endAActive ? seg.endBId : seg.endAId;
+    if (ownerOtherEndId == null) return [lineSegmentEndId];
+
+    const endsList = lineSegmentEnds();
+    const placesList = places() as ReadonlyArray<PlaceLike>;
+    const endPlace = endsList.find((e) => e.id === lineSegmentEndId)?.placeId;
+    const otherPlace = endsList.find((e) => e.id === ownerOtherEndId)?.placeId;
+    const placeKey = (pid: PlaceId | null | undefined): PlaceId | null => {
+      if (pid == null) return null;
+      const p = placesList.find((x) => x.id === pid);
+      if (!p) return null;
+      return p.repeaterEchoGroupId ?? p.id;
+    };
+    const kEnd = placeKey(endPlace);
+    const kOther = placeKey(otherPlace);
+    const explicit = getLineSegmentsInEchoGroup(seg.id, segmentsList);
+    const candidates = explicit.length > 1 ? explicit : segmentsList;
+    const out = new Set<LineSegmentEndId>();
+    if (kEnd != null && kOther != null) {
+      for (const s of candidates) {
+        if (s.endAId == null || s.endBId == null) continue;
+        const pA = endsList.find((e) => e.id === s.endAId)?.placeId;
+        const pB = endsList.find((e) => e.id === s.endBId)?.placeId;
+        const kA = placeKey(pA);
+        const kB = placeKey(pB);
+        if (kA == null || kB == null) continue;
+        if (kA === kEnd && kB === kOther) out.add(s.endAId);
+        else if (kB === kEnd && kA === kOther) out.add(s.endBId);
+      }
+    }
+    if (out.size === 0) {
+      for (const s of explicit) {
+        const eid = endAActive ? s.endAId : s.endBId;
+        if (eid != null) out.add(eid);
+      }
+    }
+    out.add(lineSegmentEndId);
+    return [...out];
+  }
+
+  /**
+   * Stable key for one line-segment end within its logical pair:
+   * key(end, otherEnd) = "{echoGroup(end)}|{echoGroup(otherEnd)}".
+   * This makes bend propagation/render resilient when segment A/B orientation differs.
+   */
+  function logicalEndKeyForPair(
+    endId: LineSegmentEndId | null | undefined,
+    otherEndId: LineSegmentEndId | null | undefined,
+    endsList: ReadonlyArray<{ id: LineSegmentEndId; placeId: PlaceId | null }>,
+    placesList: ReadonlyArray<PlaceLike>,
+  ): string | null {
+    if (endId == null || otherEndId == null) return null;
+    const endPlace = endsList.find((e) => e.id === endId)?.placeId;
+    const otherPlace = endsList.find((e) => e.id === otherEndId)?.placeId;
+    if (endPlace == null || otherPlace == null) return null;
+    const endRow = placesList.find((p) => p.id === endPlace);
+    const otherRow = placesList.find((p) => p.id === otherPlace);
+    if (!endRow || !otherRow) return null;
+    const keyA = endRow.repeaterEchoGroupId ?? endRow.id;
+    const keyB = otherRow.repeaterEchoGroupId ?? otherRow.id;
+    return `${String(keyA)}|${String(keyB)}`;
+  }
+
   /** Whether a 1-based axis number is in the alternating pattern (show/skip/start). No pattern (nulls) = all axes. */
   const inAxisAlternatingPattern = (
     axisNumber1Based: number,
@@ -2056,20 +2157,16 @@ const App: Component = () => {
     );
 
   const lineSegmentsWithPositions = (): LineSegmentWithPositions[] => {
-    const pl = places();
     const ends = lineSegmentEnds();
     const segs = lineSegments();
     const pm = pendingMove();
-    const pr = pendingRotate();
     const ps = pendingSplitLine();
-    const angleOverride =
-      pr?.kind === 'place' ? { placeId: pr.placeId, angle: pr.angle } : null;
-    const moveOverride = buildMoveOverrideForPendingMove(pl, pm, angleOverride);
+    /** Must match `bendingFieldsWithPositions` / SVG bending circles: use the same resolved world positions as `placesWithAbsolutePositions` (repeater echo propagation during pending move/rotate), not raw `getAbsolutePosition` per place — otherwise segment chords and bend end positions diverge and echoed segments render straight. */
+    const positions = placesWithAbsolutePositions();
     const getPlaceAbs = (placeId: PlaceId) => {
-      const place = pl.find((p) => p.id === placeId);
-      if (!place) return null;
-      const abs = getAbsolutePosition(place, pl, moveOverride, angleOverride);
-      return { x: abs.x, y: abs.y };
+      const row = positions.find((p) => p.id === placeId);
+      if (!row) return null;
+      return { x: row.absX, y: row.absY };
     };
     let list = segs
       .filter((seg) => !ps || seg.id !== ps.segmentId)
@@ -2127,22 +2224,216 @@ const App: Component = () => {
     return list;
   };
 
+  /** After updating one bending field during drag, sync full bend geometry (position + radius) to logical siblings. */
+  const syncBendingFieldSiblingsGeometry = (
+    activeBfId: BendingCircularFieldId,
+    activeOffsetX: number,
+    activeOffsetY: number,
+    activeRadius: number,
+  ) => {
+    const bends = bendingCircularFields();
+    const bfRow = bends.find((b) => b.id === activeBfId);
+    if (bfRow?.lineSegmentEndId == null) return;
+    const segs = lineSegments();
+    const siblingEndIds = getLogicalSiblingEndIds(bfRow.lineSegmentEndId, segs);
+    const allPos = lineSegmentsWithPositions();
+    const activeSeg = segs.find(
+      (s) =>
+        s.endAId === bfRow.lineSegmentEndId || s.endBId === bfRow.lineSegmentEndId,
+    );
+    if (!activeSeg) return;
+    const activeSegPos = allPos.find((p) => p.id === activeSeg.id);
+    if (!activeSegPos) return;
+    const activeAtEndA = bfRow.lineSegmentEndId === activeSeg.endAId;
+    const activeDirX = activeAtEndA
+      ? activeSegPos.x2 - activeSegPos.x1
+      : activeSegPos.x1 - activeSegPos.x2;
+    const activeDirY = activeAtEndA
+      ? activeSegPos.y2 - activeSegPos.y1
+      : activeSegPos.y1 - activeSegPos.y2;
+    const activeLen = Math.hypot(activeDirX, activeDirY) || 1;
+    const auX = activeDirX / activeLen;
+    const auY = activeDirY / activeLen;
+    const anX = -auY;
+    const anY = auX;
+    const along = activeOffsetX * auX + activeOffsetY * auY;
+    const perp = activeOffsetX * anX + activeOffsetY * anY;
+
+    for (const siblingEndId of siblingEndIds) {
+      const sb = bends.find((b) => b.lineSegmentEndId === siblingEndId);
+      if (!sb || sb.id === activeBfId) continue;
+      const sseg = segs.find(
+        (s) =>
+          s.endAId === siblingEndId || s.endBId === siblingEndId,
+      );
+      if (!sseg) continue;
+      const segPos = allPos.find((p) => p.id === sseg.id);
+      if (!segPos) continue;
+      const atEndA = siblingEndId === sseg.endAId;
+      const dirX = atEndA ? segPos.x2 - segPos.x1 : segPos.x1 - segPos.x2;
+      const dirY = atEndA ? segPos.y2 - segPos.y1 : segPos.y1 - segPos.y2;
+      const len = Math.hypot(dirX, dirY) || 1;
+      const uX = dirX / len;
+      const uY = dirY / len;
+      const nX = -uY;
+      const nY = uX;
+      let offsetX = along * uX + perp * nX;
+      let offsetY = along * uY + perp * nY;
+      const offLen = Math.hypot(offsetX, offsetY);
+      if (offLen > 1e-10) {
+        const s = activeRadius / offLen;
+        offsetX *= s;
+        offsetY *= s;
+      } else {
+        const fallback = bendingOffsetsForSegmentEnd(
+          segPos.x2 - segPos.x1,
+          segPos.y2 - segPos.y1,
+          activeRadius,
+          atEndA,
+        );
+        offsetX = fallback.offsetX;
+        offsetY = fallback.offsetY;
+      }
+      evolu.update('bendingCircularField', {
+        id: sb.id,
+        offsetX,
+        offsetY,
+        radius: activeRadius,
+      });
+    }
+  };
+
+  const resolveBendForSegmentEnd = (
+    segRow: { id: LineSegmentId; endAId: LineSegmentEndId; endBId: LineSegmentEndId },
+    segPos: { x1: number; y1: number; x2: number; y2: number },
+    atEndA: boolean,
+    segmentsList: ReadonlyArray<{
+      id: LineSegmentId;
+      endAId?: LineSegmentEndId | null;
+      endBId?: LineSegmentEndId | null;
+      repeaterLineSegmentEchoGroupId?: LineSegmentId | null;
+    }>,
+    bendRowByEndId: ReadonlyMap<
+      LineSegmentEndId,
+      { offsetX: number; offsetY: number; radius: number }
+    >,
+    bendRowByLogicalKey?: ReadonlyMap<
+      string,
+      { offsetX: number; offsetY: number; radius: number }
+    >,
+  ): BendCircle | undefined => {
+    const endId = atEndA ? segRow.endAId : segRow.endBId;
+    const otherEndId = atEndA ? segRow.endBId : segRow.endAId;
+    const direct = bendRowByEndId.get(endId);
+    if (direct) return bendCircleFromStoredRowAndChord(direct, segPos, atEndA);
+    if (bendRowByLogicalKey) {
+      const key = logicalEndKeyForPair(
+        endId,
+        otherEndId,
+        lineSegmentEnds(),
+        places() as ReadonlyArray<PlaceLike>,
+      );
+      if (key != null) {
+        const viaKey = bendRowByLogicalKey.get(key);
+        if (viaKey) return bendCircleFromStoredRowAndChord(viaKey, segPos, atEndA);
+      }
+    }
+    const siblingEndIds = getLogicalSiblingEndIds(endId, segmentsList);
+    const ref = siblingEndIds
+      .map((id) => bendRowByEndId.get(id))
+      .find((x): x is NonNullable<typeof x> => x != null);
+    if (!ref) return undefined;
+    const dx = segPos.x2 - segPos.x1;
+    const dy = segPos.y2 - segPos.y1;
+    const { offsetX, offsetY } = bendingOffsetsForSegmentEnd(
+      dx,
+      dy,
+      ref.radius,
+      atEndA,
+    );
+    return bendCircleFromStoredRowAndChord(
+      { offsetX, offsetY, radius: ref.radius },
+      segPos,
+      atEndA,
+    );
+  };
+
   const findLineSegmentAtCursor = (
     cx: number,
     cy: number,
   ): LineSegmentId | null => {
     const segs = lineSegmentsWithPositions();
-    const fullSegs = lineSegments();
-    const bending = bendingFieldsWithPositions();
+    const fullSegs = lineSegments().filter(
+      (s): s is typeof s & { endAId: LineSegmentEndId; endBId: LineSegmentEndId } =>
+        s.endAId != null && s.endBId != null,
+    );
+    const bendRowByEndId = new Map(
+      bendingCircularFields()
+        .filter(
+          (f): f is typeof f & { lineSegmentEndId: LineSegmentEndId } =>
+            f.lineSegmentEndId != null,
+        )
+        .map((f) => [
+          f.lineSegmentEndId,
+          {
+            offsetX: Number(f.offsetX),
+            offsetY: Number(f.offsetY),
+            radius: Number(f.radius),
+          },
+        ] as const),
+    );
+    const endsList = lineSegmentEnds().filter(
+      (e): e is typeof e & { placeId: PlaceId } => e.placeId != null,
+    );
+    const placeList = places() as ReadonlyArray<PlaceLike>;
+    const bendRowByLogicalKey = new Map<
+      string,
+      { offsetX: number; offsetY: number; radius: number }
+    >();
+    for (const f of bendingCircularFields()) {
+      if (f.lineSegmentEndId == null) continue;
+      const segRow = fullSegs.find(
+        (s) => s.endAId === f.lineSegmentEndId || s.endBId === f.lineSegmentEndId,
+      );
+      if (!segRow) continue;
+      const atA = segRow.endAId === f.lineSegmentEndId;
+      const key = logicalEndKeyForPair(
+        f.lineSegmentEndId,
+        atA ? segRow.endBId : segRow.endAId,
+        endsList,
+        placeList,
+      );
+      if (!key) continue;
+      bendRowByLogicalKey.set(key, {
+        offsetX: Number(f.offsetX),
+        offsetY: Number(f.offsetY),
+        radius: Number(f.radius),
+      });
+    }
+    const segList = lineSegments();
     let bestId: LineSegmentId | null = null;
     let bestD = LINE_SEGMENT_HIT_THRESHOLD;
     for (const seg of segs) {
       const full = fullSegs.find((s) => s.id === seg.id);
       const bendA: BendCircle | undefined = full
-        ? bending.find((b) => b.lineSegmentEndId === full.endAId)
+        ? resolveBendForSegmentEnd(
+            full,
+            seg,
+            true,
+            segList,
+            bendRowByEndId,
+            bendRowByLogicalKey,
+          )
         : undefined;
       const bendB: BendCircle | undefined = full
-        ? bending.find((b) => b.lineSegmentEndId === full.endBId)
+        ? resolveBendForSegmentEnd(
+            full,
+            seg,
+            false,
+            segList,
+            bendRowByEndId,
+            bendRowByLogicalKey,
+          )
         : undefined;
       const d = distanceFromPointToBentPath(
         cx,
@@ -2197,27 +2488,37 @@ const App: Component = () => {
     endY: number;
   }> => {
     const fields = bendingCircularFields();
-    const ends = lineSegmentEnds();
-    const positions = placesWithAbsolutePositions();
+    const segs = lineSegments();
+    const segPosList = lineSegmentsWithPositions();
+    const segPosById = new Map(segPosList.map((s) => [s.id, s]));
     return fields
       .map((f) => {
         if (f.lineSegmentEndId == null) return null;
-        const end = ends.find((e) => e.id === f.lineSegmentEndId);
-        if (!end?.placeId) return null;
-        const place = positions.find((p) => p.id === end.placeId);
-        if (!place) return null;
-        const endX = place.absX;
-        const endY = place.absY;
-        const centerX = endX + Number(f.offsetX);
-        const centerY = endY + Number(f.offsetY);
+        const segRow = segs.find(
+          (s) =>
+            s.endAId === f.lineSegmentEndId || s.endBId === f.lineSegmentEndId,
+        );
+        if (!segRow) return null;
+        const sp = segPosById.get(segRow.id);
+        if (!sp) return null;
+        const atEndA = segRow.endAId === f.lineSegmentEndId;
+        const bc = bendCircleFromStoredRowAndChord(
+          {
+            offsetX: Number(f.offsetX),
+            offsetY: Number(f.offsetY),
+            radius: Number(f.radius),
+          },
+          sp,
+          atEndA,
+        );
         return {
           id: f.id,
           lineSegmentEndId: f.lineSegmentEndId,
-          centerX,
-          centerY,
-          radius: Number(f.radius),
-          endX,
-          endY,
+          centerX: bc.centerX,
+          centerY: bc.centerY,
+          radius: bc.radius,
+          endX: bc.endX,
+          endY: bc.endY,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x != null);
@@ -4431,12 +4732,15 @@ const App: Component = () => {
         const L = Math.hypot(ox, oy) || 1;
         const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, L);
         const s = radius / L;
+        const offsetX = ox * s;
+        const offsetY = oy * s;
         evolu.update('bendingCircularField', {
           id: pmbf,
-          offsetX: ox * s,
-          offsetY: oy * s,
+          offsetX,
+          offsetY,
           radius,
         });
+        syncBendingFieldSiblingsGeometry(pmbf, offsetX, offsetY, radius);
       }
     }
     const draggingBf = draggingBendingCircularFieldRadius();
@@ -4461,6 +4765,12 @@ const App: Component = () => {
           offsetY,
           radius: newRadius,
         });
+        syncBendingFieldSiblingsGeometry(
+          draggingBf,
+          offsetX,
+          offsetY,
+          newRadius,
+        );
       }
     }
   };
@@ -6763,6 +7073,17 @@ const App: Component = () => {
     if (pdbId) {
       const bf = bendingCircularFields().find((b) => b.id === pdbId);
       if (bf?.lineSegmentEndId != null) {
+        const siblingEndIds = getLogicalSiblingEndIds(
+          bf.lineSegmentEndId,
+          lineSegments(),
+        );
+        for (const endId of siblingEndIds) {
+          const row = bendingCircularFields().find(
+            (b) => b.lineSegmentEndId === endId,
+          );
+          if (!row) continue;
+          evolu.update('bendingCircularField', { id: row.id, isDeleted: true });
+        }
         const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
         const seg = lineSegments().find(
           (s) =>
@@ -6777,8 +7098,9 @@ const App: Component = () => {
             bendingCircularFieldId: pdbId,
           });
         }
+      } else {
+        evolu.update('bendingCircularField', { id: pdbId, isDeleted: true });
       }
-      evolu.update('bendingCircularField', { id: pdbId, isDeleted: true });
       setPendingDeleteBendingCircularFieldId(null);
     }
 
@@ -7843,15 +8165,80 @@ const App: Component = () => {
             })()}
             {(() => {
               const segs = lineSegmentsWithPositions();
-              const fullSegs = lineSegments();
-              const bending = bendingFieldsWithPositions();
+              const fullSegs = lineSegments().filter(
+                (
+                  s,
+                ): s is typeof s & {
+                  endAId: LineSegmentEndId;
+                  endBId: LineSegmentEndId;
+                } => s.endAId != null && s.endBId != null,
+              );
+              const bendRowByEndId = new Map(
+                bendingCircularFields()
+                  .filter(
+                    (f): f is typeof f & { lineSegmentEndId: LineSegmentEndId } =>
+                      f.lineSegmentEndId != null,
+                  )
+                  .map((f) => [
+                    f.lineSegmentEndId,
+                    {
+                      offsetX: Number(f.offsetX),
+                      offsetY: Number(f.offsetY),
+                      radius: Number(f.radius),
+                    },
+                  ] as const),
+              );
+              const endsList = lineSegmentEnds().filter(
+                (e): e is typeof e & { placeId: PlaceId } => e.placeId != null,
+              );
+              const placeList = places() as ReadonlyArray<PlaceLike>;
+              const bendRowByLogicalKey = new Map<
+                string,
+                { offsetX: number; offsetY: number; radius: number }
+              >();
+              for (const f of bendingCircularFields()) {
+                if (f.lineSegmentEndId == null) continue;
+                const segRow = fullSegs.find(
+                  (s) =>
+                    s.endAId === f.lineSegmentEndId ||
+                    s.endBId === f.lineSegmentEndId,
+                );
+                if (!segRow) continue;
+                const atA = segRow.endAId === f.lineSegmentEndId;
+                const key = logicalEndKeyForPair(
+                  f.lineSegmentEndId,
+                  atA ? segRow.endBId : segRow.endAId,
+                  endsList,
+                  placeList,
+                );
+                if (!key) continue;
+                bendRowByLogicalKey.set(key, {
+                  offsetX: Number(f.offsetX),
+                  offsetY: Number(f.offsetY),
+                  radius: Number(f.radius),
+                });
+              }
               return segs.map((seg) => {
                 const full = fullSegs.find((s) => s.id === seg.id);
                 const bendA = full
-                  ? bending.find((b) => b.lineSegmentEndId === full.endAId)
+                  ? resolveBendForSegmentEnd(
+                      full,
+                      seg,
+                      true,
+                      fullSegs,
+                      bendRowByEndId,
+                      bendRowByLogicalKey,
+                    )
                   : undefined;
                 const bendB = full
-                  ? bending.find((b) => b.lineSegmentEndId === full.endBId)
+                  ? resolveBendForSegmentEnd(
+                      full,
+                      seg,
+                      false,
+                      fullSegs,
+                      bendRowByEndId,
+                      bendRowByLogicalKey,
+                    )
                   : undefined;
                 const pathD = buildBentSegmentPath(
                   { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 },
