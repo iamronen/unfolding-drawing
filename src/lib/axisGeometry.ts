@@ -151,3 +151,26 @@ export function projectPointOntoAxis(
   const uy = Math.sin(angle);
   return dx * ux + dy * uy;
 }
+
+/**
+ * Reflect point across the infinite line through (originX, originY) with direction `angle`.
+ * Axis tangent T = (cos(angle), sin(angle)), normal N = (-sin(angle), cos(angle)).
+ */
+export function reflectPointAcrossAxisLine(
+  px: number,
+  py: number,
+  originX: number,
+  originY: number,
+  angle: number,
+): { x: number; y: number } {
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const vx = px - originX;
+  const vy = py - originY;
+  const along = vx * cosA + vy * sinA;
+  const perp = -vx * sinA + vy * cosA;
+  return {
+    x: originX + along * cosA + perp * sinA,
+    y: originY + along * sinA - perp * cosA,
+  };
+}

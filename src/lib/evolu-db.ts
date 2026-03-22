@@ -145,7 +145,7 @@ export const Schema = {
     id: CircularFieldId,
     placeId: PlaceId,
     radius: FiniteNumber,
-    /** Angle of the radius handle in radians (0 = east). Null = east when drawing. */
+    /** Angle of the radius handle in radians (0 = east, +x). New fields default to north (-π/2) in the app. */
     radiusHandleAngle: nullOr(FiniteNumber),
   },
   bendingCircularField: {
