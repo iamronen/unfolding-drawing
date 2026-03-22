@@ -210,6 +210,8 @@ export type RecordAddPlaceOnCircularRepeater = {
   alternatingShow?: number;
   alternatingSkip?: number;
   alternatingStart?: number;
+  /** 1 when mirror copies across repeater arms were created. */
+  repeaterMirrorEnabled?: 0 | 1 | null;
 };
 
 /** Payload for modify place on circular repeater (move echo set). */
@@ -222,6 +224,7 @@ export type RecordModifyPlaceOnCircularRepeater = {
   alternatingShow?: number;
   alternatingSkip?: number;
   alternatingStart?: number;
+  repeaterMirrorEnabled?: 0 | 1 | null;
 };
 
 export type TransformationRecord =
@@ -602,6 +605,12 @@ export function recordTransformation(data: TransformationRecord): void {
         alternatingShow: data.alternatingShow ?? null,
         alternatingSkip: data.alternatingSkip ?? null,
         alternatingStart: data.alternatingStart ?? null,
+        repeaterMirrorEnabled:
+          data.repeaterMirrorEnabled === 1
+            ? 1
+            : data.repeaterMirrorEnabled === 0
+              ? 0
+              : null,
       });
       break;
     case 'modifyPlaceOnCircularRepeater':
@@ -625,6 +634,12 @@ export function recordTransformation(data: TransformationRecord): void {
         alternatingShow: data.alternatingShow ?? null,
         alternatingSkip: data.alternatingSkip ?? null,
         alternatingStart: data.alternatingStart ?? null,
+        repeaterMirrorEnabled:
+          data.repeaterMirrorEnabled === 1
+            ? 1
+            : data.repeaterMirrorEnabled === 0
+              ? 0
+              : null,
       });
       break;
   }

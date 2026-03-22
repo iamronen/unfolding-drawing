@@ -788,6 +788,11 @@ A set of related drawing object echoes within a repeater.
 A circular repeater is a scaffolding drawing object generates a number of unidirectional axes that emanate from its center. 
 Places added to the repeater in relation to any of its axis are repeated on its axes.
 
+### Repeater mirror (circular repeater)
+When a place is positioned **off** the closest repeater arm (not snapped onto that arm’s line), an optional **repeater mirror** can duplicate the place on the **opposite** side of the same arm: same distance along the arm and the same perpendicular offset with opposite sign, so the echo group can double. The repetition pattern applies to both sides. This is **not** the same as a **mirror axis** (an axis with the mirror property on a line axis).
+
+When adding line segments between repeater echoes with repeater mirror on, **primary** echoes are paired first (same index pairing as without mirror); additional segments run from each **mirror** origin to the termination echo on the arm reflected across the **origin** arm (1-based axis indices: E′ = 2O − E, modulo the number of arms).
+
 ### Alternating Repetition
 In a repeater an alternating repetition pattern can be applied to a drawing object.
 Different drawing objects within the same repeater can have different repetition patterns.

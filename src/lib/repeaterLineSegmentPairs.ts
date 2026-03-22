@@ -2,6 +2,9 @@
  * Index pairs for repeating line segments between two echo groups on a circular repeater,
  * after both lists are rotated so the user-selected origin and termination are at index 0.
  *
+ * Callers that include both primary and repeater-mirror rows in one list should **filter to
+ * primary echoes only** before pairing; otherwise Lo doubles and stride pairing skips mirrors.
+ *
  * Coherence:
  * - Equal sizes: parallel pairing (i, i).
  * - Termination count is a multiple of origin count: (i, i * k) with k = Le / Lo.

@@ -109,6 +109,10 @@ export const Schema = {
     alternatingShow: nullOr(FiniteNumber),
     alternatingSkip: nullOr(FiniteNumber),
     alternatingStart: nullOr(FiniteNumber),
+    /** On canonical repeater echo place only: 1 when mirror copies exist across repeater arms. */
+    repeaterMirrorEnabled: nullOr(FiniteNumber),
+    /** Mirror row points to primary place (same axis, opposite distanceFromAxis). */
+    repeaterMirrorOfPlaceId: nullOr(PlaceId),
   },
   axis: {
     id: AxisId,
@@ -177,6 +181,7 @@ export const Schema = {
     alternatingShow: nullOr(FiniteNumber),
     alternatingSkip: nullOr(FiniteNumber),
     alternatingStart: nullOr(FiniteNumber),
+    repeaterMirrorEnabled: nullOr(FiniteNumber),
   },
 } satisfies EvoluSchema;
 

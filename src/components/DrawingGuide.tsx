@@ -78,6 +78,10 @@ interface DrawingGuideProps {
     skip: number,
     start: number,
   ) => void;
+  /** Off-axis repeater placement: mirror copy on the opposite side of the closest axis. */
+  repeaterMirrorEnabled: boolean;
+  repeaterMirrorCanEnable: boolean;
+  onRepeaterMirrorChange: (enabled: boolean) => void;
   circularRepeaterAxisCount: number;
   bendAtEndsState: {
     endALabel: string;
@@ -711,6 +715,42 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                           </div>
                         )}
                     </>
+                  )}
+                  {(props.transformChoice === 'addPlaceOnCircularRepeater' ||
+                    props.transformChoice ===
+                      'modifyPlaceOnCircularRepeater') && (
+                    <div class="mt-3 flex flex-col gap-2">
+                      <label
+                        class={`flex items-center gap-2 ${
+                          props.repeaterMirrorCanEnable
+                            ? 'cursor-pointer'
+                            : 'cursor-not-allowed opacity-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={!props.repeaterMirrorCanEnable}
+                          checked={
+                            props.repeaterMirrorCanEnable &&
+                            props.repeaterMirrorEnabled
+                          }
+                          onChange={(e) =>
+                            props.onRepeaterMirrorChange(
+                              (e.target as HTMLInputElement).checked,
+                            )
+                          }
+                          class="rounded border-slate-300"
+                        />
+                        <span class="text-sm">
+                          Mirror across closest repeater axis (doubles the echo
+                          group when off-axis)
+                        </span>
+                      </label>
+                      <p class="text-xs text-slate-500">
+                        Available when the place is off the axis line; on-axis
+                        positions disable this option.
+                      </p>
+                    </div>
                   )}
                   {props.transformChoice === 'deleteCircularRepeater' && (
                     <p class={classes.guideText}>

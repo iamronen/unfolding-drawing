@@ -73,6 +73,16 @@ import {
 } from './lib/mirrorEchoOrder';
 import { recordTransformation } from './lib/recordTransformation';
 import { getRepeaterEchoSegmentIndexPairs } from './lib/repeaterLineSegmentPairs';
+import {
+  filterRepeaterEchoPrimaries,
+  getMirrorPlaceForRepeaterPrimary,
+  reflectRepeaterMirrorEndAxisIndex,
+} from './lib/repeaterMirrorLineSegment';
+import {
+  collectLineSegmentIdsForPlaces,
+  repeaterMirrorCanEnable,
+  repeaterMirrorPlaceAngles,
+} from './lib/repeaterPlaceMirror';
 import { chooseParentForSplitPlace } from './lib/splitLineHierarchy';
 import {
   availableTransforms as getAvailableTransforms,
@@ -228,6 +238,7 @@ const App: Component = () => {
     alternatingShow?: number | null;
     alternatingSkip?: number | null;
     alternatingStart?: number | null;
+    repeaterMirrorEnabled?: boolean;
   } | null>(null);
 
   const [bendAtEndsDirty, setBendAtEndsDirty] = createSignal(false);
@@ -562,6 +573,7 @@ const App: Component = () => {
     alternatingShow?: number;
     alternatingSkip?: number;
     alternatingStart?: number;
+    repeaterMirrorEnabled?: boolean;
   } | null>(null);
   const [pendingDeleteCircularRepeaterId, setPendingDeleteCircularRepeaterId] =
     createSignal<CircularRepeaterId | null>(null);
@@ -658,6 +670,55 @@ const App: Component = () => {
     return result;
   }
 
+  /** Soft-delete mirror-only repeater places (and descendants) and related line echo groups. */
+  function deleteRepeaterMirrorEchoRowsAndLines(
+    groupId: PlaceId,
+    pl: ReadonlyArray<PlaceLike>,
+  ): void {
+    const mirrorIds = pl
+      .filter(
+        (p) =>
+          (p as PlaceLike).repeaterEchoGroupId === groupId &&
+          (p as PlaceLike).repeaterMirrorOfPlaceId != null,
+      )
+      .map((p) => p.id);
+    const toDelete = new Set<PlaceId>();
+    for (const id of mirrorIds) {
+      toDelete.add(id);
+      for (const d of getDescendantPlaceIds(id, pl)) {
+        toDelete.add(d);
+      }
+    }
+    if (toDelete.size === 0) return;
+    const segmentsList = lineSegments();
+    const ends = lineSegmentEnds();
+    const segIds = collectLineSegmentIdsForPlaces(toDelete, segmentsList, ends);
+    for (const segId of segIds) {
+      const group = getLineSegmentsInEchoGroup(segId, segmentsList);
+      for (const seg of group) {
+        if (seg.endAId != null && seg.endBId != null) {
+          const endA = ends.find((e) => e.id === seg.endAId);
+          const placeIdForDelete =
+            endA?.placeId ?? ends.find((e) => e.id === seg.endBId)?.placeId;
+          if (placeIdForDelete != null) {
+            recordTransformation({
+              kind: 'deleteLine',
+              placeId: placeIdForDelete,
+              lineSegmentId: seg.id,
+            });
+          }
+          evolu.update('lineSegment', { id: seg.id, isDeleted: true });
+          evolu.update('lineSegmentEnd', { id: seg.endAId, isDeleted: true });
+          evolu.update('lineSegmentEnd', { id: seg.endBId, isDeleted: true });
+        }
+      }
+    }
+    for (const id of toDelete) {
+      recordTransformation({ kind: 'delete', placeId: id });
+      evolu.update('place', { id, isDeleted: true });
+    }
+  }
+
   function nextLineSegmentName(
     segmentsList: ReadonlyArray<{ name: string | null }>,
   ): string {
@@ -679,6 +740,8 @@ const App: Component = () => {
     distanceAlongAxis?: number | null;
     distanceFromAxis?: number | null;
     repeaterEchoGroupId?: PlaceId | null;
+    repeaterMirrorEnabled?: number | null;
+    repeaterMirrorOfPlaceId?: PlaceId | null;
     parentCircularFieldId?: CircularFieldId | null;
     angleOnCircle?: number | null;
     x: number | null;
@@ -1752,64 +1815,103 @@ const App: Component = () => {
     }
     const paRep = pendingAddPlaceOnCircularRepeater();
     if (paRep) {
-      const repAxes = axes().filter(
-        (a) =>
-          (a as { circularRepeaterId?: CircularRepeaterId })
-            .circularRepeaterId === paRep.circularRepeaterId,
+      const echoRepIds = getCircularRepeaterEchoGroupIds(
+        paRep.circularRepeaterId,
+        circularRepeaters(),
+        pl,
+        axes(),
       );
-      const count = repAxes.length;
+      const usePattern = paRep.patternEnabled === true;
       const show = paRep.alternatingShow ?? 1;
       const skip = paRep.alternatingSkip ?? 1;
       const start = paRep.alternatingStart ?? 1;
       const perp = paRep.distanceFromAxis ?? 0;
-      const usePattern = paRep.patternEnabled === true;
-      let pendingEchoIndex = 0;
-      for (let i = 0; i < repAxes.length; i++) {
-        const axis = repAxes[i];
-        if (!axis) continue;
-        if (
-          usePattern &&
-          !inAxisAlternatingPattern(
-            circularRepeaterAxisNumber(
-              axis.id,
-              paRep.circularRepeaterId,
-              axes(),
-            ),
-            start,
-            show,
-            skip,
-            count,
+      const axesList = axes();
+      const repAxesInPatternPerRepeater = echoRepIds.map((repId) => {
+        const repAxes = axesList
+          .filter(
+            (a) =>
+              (a as { circularRepeaterId?: CircularRepeaterId })
+                .circularRepeaterId === repId,
           )
-        )
-          continue;
-        pendingEchoIndex += 1;
-        const parentPlace = pl.find((p) => p.id === axis.placeId);
-        if (parentPlace) {
-          const parentAbs = getAbsolutePosition(
-            parentPlace,
-            pl,
-            moveOverride,
-            angleOverride,
-          );
-          const worldAngle = parentAbs.worldAngle + Number(axis.angle);
-          const d = Math.max(0, paRep.distanceAlongAxis);
-          const cosA = Math.cos(worldAngle);
-          const sinA = Math.sin(worldAngle);
-          const px = parentAbs.x + d * cosA + perp * -sinA;
-          const py = parentAbs.y + d * sinA + perp * cosA;
-          result.push({
-            id: `__pending_rep_${pendingEchoIndex}__` as PlaceId,
-            parentId: null,
-            parentAxisId: null,
-            x: 0,
-            y: 0,
-            angle: null,
-            name: null,
-            isScaffolding: 1,
-            absX: px,
-            absY: py,
-            absWorldAngle: worldAngle,
-          } as (typeof result)[number]);
+          .sort((a, b) => Number(a.angle) - Number(b.angle));
+        const count = repAxes.length;
+        return usePattern
+          ? repAxes.filter((axis) => {
+              const axisNum = circularRepeaterAxisNumber(
+                axis.id,
+                repId,
+                axesList,
+              );
+              return inAxisAlternatingPattern(
+                axisNum,
+                start,
+                show,
+                skip,
+                count,
+              );
+            })
+          : repAxes;
+      });
+      const patternLength = repAxesInPatternPerRepeater[0]?.length ?? 0;
+      const mirrorEffective =
+        paRep.repeaterMirrorEnabled === true && repeaterMirrorCanEnable(perp);
+      const mirrorAngles = repeaterMirrorPlaceAngles(perp);
+      let pendingEchoIndex = 0;
+      for (let axisIdx = 0; axisIdx < patternLength; axisIdx++) {
+        for (let repIdx = 0; repIdx < echoRepIds.length; repIdx++) {
+          const axisForRep = repAxesInPatternPerRepeater[repIdx]?.[axisIdx];
+          if (!axisForRep) continue;
+          pendingEchoIndex += 1;
+          const parentPlace = pl.find((p) => p.id === axisForRep.placeId);
+          if (parentPlace) {
+            const parentAbs = getAbsolutePosition(
+              parentPlace,
+              pl,
+              moveOverride,
+              angleOverride,
+            );
+            const baseAxisAngle =
+              parentAbs.worldAngle + Number(axisForRep.angle);
+            const d = Math.max(0, paRep.distanceAlongAxis);
+            const cosA = Math.cos(baseAxisAngle);
+            const sinA = Math.sin(baseAxisAngle);
+            const px = parentAbs.x + d * cosA + perp * -sinA;
+            const py = parentAbs.y + d * sinA + perp * cosA;
+            result.push({
+              id: `__pending_rep_${pendingEchoIndex}__` as PlaceId,
+              parentId: null,
+              parentAxisId: null,
+              x: 0,
+              y: 0,
+              angle: null,
+              name: null,
+              isScaffolding: 1,
+              absX: px,
+              absY: py,
+              absWorldAngle: mirrorEffective
+                ? baseAxisAngle + mirrorAngles.primary
+                : baseAxisAngle,
+            } as (typeof result)[number]);
+            if (mirrorEffective) {
+              pendingEchoIndex += 1;
+              const pxM = parentAbs.x + d * cosA + -perp * -sinA;
+              const pyM = parentAbs.y + d * sinA + -perp * cosA;
+              result.push({
+                id: `__pending_rep_${pendingEchoIndex}__` as PlaceId,
+                parentId: null,
+                parentAxisId: null,
+                x: 0,
+                y: 0,
+                angle: null,
+                name: null,
+                isScaffolding: 1,
+                absX: pxM,
+                absY: pyM,
+                absWorldAngle: baseAxisAngle + mirrorAngles.mirror,
+              } as (typeof result)[number]);
+            }
+          }
         }
       }
     }
@@ -1854,6 +1956,36 @@ const App: Component = () => {
     }
     return result;
   };
+
+  const repeaterMirrorCanEnableUI = createMemo(() => {
+    const tc = transformChoice();
+    if (tc === 'addPlaceOnCircularRepeater') {
+      const pa = pendingAddPlaceOnCircularRepeater();
+      return pa ? repeaterMirrorCanEnable(pa.distanceFromAxis) : false;
+    }
+    if (tc === 'modifyPlaceOnCircularRepeater') {
+      const pm = pendingModifyPlaceOnCircularRepeater();
+      const repId = pm?.circularRepeaterId;
+      const move = pendingMove();
+      const pid = selectedPlaceId();
+      if (repId && move && pid && move.placeId === pid) {
+        const params = repeaterPointToAxisParams(
+          repId,
+          move.x,
+          move.y,
+          placesWithAbsolutePositions(),
+        );
+        return repeaterMirrorCanEnable(params.distanceFromAxis);
+      }
+      const pl = places().find((p) => p.id === pid) as PlaceLike | undefined;
+      const primary =
+        pl?.repeaterMirrorOfPlaceId != null
+          ? places().find((q) => q.id === pl.repeaterMirrorOfPlaceId)
+          : pl;
+      return repeaterMirrorCanEnable(primary?.distanceFromAxis);
+    }
+    return false;
+  });
 
   const relatedPlaceIds = createMemo(() =>
     getRelatedPlaceIds(selectedPlaceId(), places()),
@@ -2561,11 +2693,14 @@ const App: Component = () => {
               axes(),
             )
           : undefined;
+      const perp0 = params.distanceFromAxis;
+      const onAxis0 = Math.abs(perp0) <= AXIS_MAGNETIC_THRESHOLD;
       setPendingAddPlaceOnCircularRepeater({
         ...paRep,
         distanceAlongAxis: params.distanceAlongAxis,
-        distanceFromAxis: params.distanceFromAxis,
+        distanceFromAxis: perp0,
         ...(placementAxisNumber != null && { placementAxisNumber }),
+        ...(onAxis0 ? { repeaterMirrorEnabled: false } : {}),
       });
       setDraggingPlaceOnCircularRepeater(paRep.circularRepeaterId);
       return;
@@ -2845,24 +2980,50 @@ const App: Component = () => {
                     axesList,
                   )
                 : endingEchoesRaw;
-            const originIdx = originEchoes.findIndex(
+            const canonOriginPlace = placesList.find(
+              (p) => p.id === pals.originGroupId,
+            ) as PlaceLike | undefined;
+            const originRepeaterMirrorEnabled =
+              pals.mode === 'circularRepeater' &&
+              canonOriginPlace?.repeaterMirrorEnabled === 1;
+            const canonEndPlace = placesList.find((p) => p.id === hitGroupId) as
+              | PlaceLike
+              | undefined;
+            const endingRepeaterMirrorEnabled =
+              pals.mode === 'circularRepeater' &&
+              canonEndPlace?.repeaterMirrorEnabled === 1;
+            const originPairing = originRepeaterMirrorEnabled
+              ? filterRepeaterEchoPrimaries(originEchoes, pals.originGroupId)
+              : originEchoes;
+            const endPairing = endingRepeaterMirrorEnabled
+              ? filterRepeaterEchoPrimaries(endingEchoes, hitGroupId)
+              : endingEchoes;
+            const originSelRow = placesList.find(
               (p) => p.id === pals.originSelectedPlaceId,
+            ) as PlaceLike | undefined;
+            const originAnchorId =
+              originSelRow?.repeaterMirrorOfPlaceId != null
+                ? originSelRow.repeaterMirrorOfPlaceId
+                : pals.originSelectedPlaceId;
+            const endAnchorId =
+              hitPlace?.repeaterMirrorOfPlaceId != null
+                ? hitPlace.repeaterMirrorOfPlaceId
+                : hit.id;
+            const originIdx = originPairing.findIndex(
+              (p) => p.id === originAnchorId,
             );
-            const endIdx = endingEchoes.findIndex((p) => p.id === hit.id);
+            const endIdx = endPairing.findIndex((p) => p.id === endAnchorId);
             const originRotated =
               originIdx >= 0
                 ? [
-                    ...originEchoes.slice(originIdx),
-                    ...originEchoes.slice(0, originIdx),
+                    ...originPairing.slice(originIdx),
+                    ...originPairing.slice(0, originIdx),
                   ]
-                : originEchoes;
+                : originPairing;
             const endRotated =
               endIdx >= 0
-                ? [
-                    ...endingEchoes.slice(endIdx),
-                    ...endingEchoes.slice(0, endIdx),
-                  ]
-                : endingEchoes;
+                ? [...endPairing.slice(endIdx), ...endPairing.slice(0, endIdx)]
+                : endPairing;
             const indexPairs = getRepeaterEchoSegmentIndexPairs(
               originRotated.length,
               endRotated.length,
@@ -2926,6 +3087,104 @@ const App: Component = () => {
                     id: endBRes.value.id,
                     name: endBName.value,
                   });
+              }
+            }
+            if (
+              pals.mode === 'circularRepeater' &&
+              originRepeaterMirrorEnabled &&
+              firstSegId != null
+            ) {
+              const nAxes = axesList.filter(
+                (a) =>
+                  (a as { circularRepeaterId?: CircularRepeaterId | null })
+                    .circularRepeaterId === pals.circularRepeaterId,
+              ).length;
+              for (const [iO, iE] of indexPairs) {
+                const origP = originRotated[iO]!;
+                const endP = endRotated[iE]!;
+                const origM = getMirrorPlaceForRepeaterPrimary(
+                  origP.id,
+                  placesList,
+                );
+                if (origM == null) continue;
+                const O = circularRepeaterAxisNumberForPlace(
+                  origP.id,
+                  placesList,
+                  axesList,
+                );
+                const E = circularRepeaterAxisNumberForPlace(
+                  endP.id,
+                  placesList,
+                  axesList,
+                );
+                if (O <= 0 || E <= 0) continue;
+                const ePrime = reflectRepeaterMirrorEndAxisIndex(O, E, nAxes);
+                const endTarget =
+                  endPairing.find(
+                    (p) =>
+                      circularRepeaterAxisNumberForPlace(
+                        p.id,
+                        placesList,
+                        axesList,
+                      ) === ePrime &&
+                      (p as PlaceLike).repeaterMirrorOfPlaceId == null,
+                  ) ??
+                  endingEchoes.find(
+                    (p) =>
+                      circularRepeaterAxisNumberForPlace(
+                        p.id,
+                        placesList,
+                        axesList,
+                      ) === ePrime &&
+                      (p as PlaceLike).repeaterMirrorOfPlaceId == null,
+                  );
+                if (endTarget == null) continue;
+                const endAResM = evolu.insert('lineSegmentEnd', {
+                  placeId: origM,
+                });
+                const endBResM = evolu.insert('lineSegmentEnd', {
+                  placeId: endTarget.id,
+                });
+                if (endAResM.ok && endBResM.ok && segNameResult.ok) {
+                  const segResM = evolu.insert('lineSegment', {
+                    endAId: endAResM.value.id,
+                    endBId: endBResM.value.id,
+                    name: segNameResult.value,
+                    isScaffolding: 0,
+                    repeaterLineSegmentEchoGroupId: firstSegId,
+                  }) as
+                    | { ok: true; value: { id: LineSegmentId } }
+                    | { ok: false };
+                  if (segResM.ok) {
+                    recordTransformation({
+                      kind: 'addLine',
+                      placeId: origM,
+                      lineSegmentId: segResM.value.id,
+                    });
+                  }
+                  const placeNameAM =
+                    placesList.find((p) => p.id === origM)?.name?.trim() ||
+                    'Place';
+                  const placeNameBM =
+                    (endTarget as { name?: string | null }).name?.trim() ||
+                    'Place';
+                  const endANameM = String1000.from(
+                    lineSegmentEndDisplayName(lineName, placeNameAM),
+                  );
+                  const endBNameM = String1000.from(
+                    lineSegmentEndDisplayName(lineName, placeNameBM),
+                  );
+                  if (endANameM.ok)
+                    evolu.update('lineSegmentEnd', {
+                      id: endAResM.value.id,
+                      name: endANameM.value,
+                    });
+                  if (endBNameM.ok)
+                    evolu.update('lineSegmentEnd', {
+                      id: endBResM.value.id,
+                      name: endBNameM.value,
+                    });
+                }
               }
             }
             if (pals.mode === 'circularRepeater') {
@@ -3000,17 +3259,40 @@ const App: Component = () => {
                     placesList,
                     axesList,
                   );
-                  const originIdxO = originEchoesO.findIndex(
+                  const originPairingO = originRepeaterMirrorEnabled
+                    ? filterRepeaterEchoPrimaries(
+                        originEchoesO,
+                        pals.originGroupId,
+                      )
+                    : originEchoesO;
+                  const endPairingO = endingRepeaterMirrorEnabled
+                    ? filterRepeaterEchoPrimaries(endingEchoesO, hitGroupId)
+                    : endingEchoesO;
+                  const otherOriginRow = placesList.find(
                     (p) => p.id === otherOrigin.id,
-                  );
-                  const endIdxO = endingEchoesO.findIndex(
+                  ) as PlaceLike | undefined;
+                  const otherOriginAnchor =
+                    otherOriginRow?.repeaterMirrorOfPlaceId != null
+                      ? otherOriginRow.repeaterMirrorOfPlaceId
+                      : otherOrigin.id;
+                  const otherEndRow = placesList.find(
                     (p) => p.id === otherEnd.id,
+                  ) as PlaceLike | undefined;
+                  const otherEndAnchor =
+                    otherEndRow?.repeaterMirrorOfPlaceId != null
+                      ? otherEndRow.repeaterMirrorOfPlaceId
+                      : otherEnd.id;
+                  const originIdxO = originPairingO.findIndex(
+                    (p) => p.id === otherOriginAnchor,
+                  );
+                  const endIdxO = endPairingO.findIndex(
+                    (p) => p.id === otherEndAnchor,
                   );
                   const originRotatedO = rotateEchoList(
-                    originEchoesO,
+                    originPairingO,
                     originIdxO,
                   );
-                  const endRotatedO = rotateEchoList(endingEchoesO, endIdxO);
+                  const endRotatedO = rotateEchoList(endPairingO, endIdxO);
                   const indexPairsO = getRepeaterEchoSegmentIndexPairs(
                     originRotatedO.length,
                     endRotatedO.length,
@@ -3067,6 +3349,109 @@ const App: Component = () => {
                         });
                     }
                   }
+                  if (originRepeaterMirrorEnabled && firstSegId != null) {
+                    const nAxesO = axesList.filter(
+                      (a) =>
+                        (
+                          a as {
+                            circularRepeaterId?: CircularRepeaterId | null;
+                          }
+                        ).circularRepeaterId === pals.circularRepeaterId,
+                    ).length;
+                    for (const [iO, iE] of indexPairsO) {
+                      const origP = originRotatedO[iO]!;
+                      const endP = endRotatedO[iE]!;
+                      const origM = getMirrorPlaceForRepeaterPrimary(
+                        origP.id,
+                        placesList,
+                      );
+                      if (origM == null) continue;
+                      const O = circularRepeaterAxisNumberForPlace(
+                        origP.id,
+                        placesList,
+                        axesList,
+                      );
+                      const E = circularRepeaterAxisNumberForPlace(
+                        endP.id,
+                        placesList,
+                        axesList,
+                      );
+                      if (O <= 0 || E <= 0) continue;
+                      const ePrime = reflectRepeaterMirrorEndAxisIndex(
+                        O,
+                        E,
+                        nAxesO,
+                      );
+                      const endTarget =
+                        endPairingO.find(
+                          (p) =>
+                            circularRepeaterAxisNumberForPlace(
+                              p.id,
+                              placesList,
+                              axesList,
+                            ) === ePrime &&
+                            (p as PlaceLike).repeaterMirrorOfPlaceId == null,
+                        ) ??
+                        endingEchoesO.find(
+                          (p) =>
+                            circularRepeaterAxisNumberForPlace(
+                              p.id,
+                              placesList,
+                              axesList,
+                            ) === ePrime &&
+                            (p as PlaceLike).repeaterMirrorOfPlaceId == null,
+                        );
+                      if (endTarget == null) continue;
+                      const endAResM = evolu.insert('lineSegmentEnd', {
+                        placeId: origM,
+                      });
+                      const endBResM = evolu.insert('lineSegmentEnd', {
+                        placeId: endTarget.id,
+                      });
+                      if (endAResM.ok && endBResM.ok && segNameResultO.ok) {
+                        const segResM = evolu.insert('lineSegment', {
+                          endAId: endAResM.value.id,
+                          endBId: endBResM.value.id,
+                          name: segNameResultO.value,
+                          isScaffolding: 0,
+                          repeaterLineSegmentEchoGroupId: firstSegId,
+                        }) as
+                          | { ok: true; value: { id: LineSegmentId } }
+                          | { ok: false };
+                        if (segResM.ok) {
+                          recordTransformation({
+                            kind: 'addLine',
+                            placeId: origM,
+                            lineSegmentId: segResM.value.id,
+                          });
+                        }
+                        const placeNameAM =
+                          placesList
+                            .find((p) => p.id === origM)
+                            ?.name?.trim() || 'Place';
+                        const placeNameBM =
+                          (
+                            endTarget as { name?: string | null }
+                          ).name?.trim() || 'Place';
+                        const endANameM = String1000.from(
+                          lineSegmentEndDisplayName(lineNameO, placeNameAM),
+                        );
+                        const endBNameM = String1000.from(
+                          lineSegmentEndDisplayName(lineNameO, placeNameBM),
+                        );
+                        if (endANameM.ok)
+                          evolu.update('lineSegmentEnd', {
+                            id: endAResM.value.id,
+                            name: endANameM.value,
+                          });
+                        if (endBNameM.ok)
+                          evolu.update('lineSegmentEnd', {
+                            id: endBResM.value.id,
+                            name: endBNameM.value,
+                          });
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -3084,7 +3469,16 @@ const App: Component = () => {
           : getMirrorAxisIdForEchoPlace(hit.id, placesList, axesList) !==
             pals.mirrorAxisId);
       if (isCase2AddLineSegment) {
-        const firstOrigin = originEchoes[0]! as PlaceLike & {
+        const canonOriginCase2 = placesList.find(
+          (p) => p.id === pals.originGroupId,
+        ) as PlaceLike | undefined;
+        const case2RepeaterMirrorEnabled =
+          pals.mode === 'circularRepeater' &&
+          canonOriginCase2?.repeaterMirrorEnabled === 1;
+        const originEchoesCase2 = case2RepeaterMirrorEnabled
+          ? filterRepeaterEchoPrimaries(originEchoes, pals.originGroupId)
+          : originEchoes;
+        const firstOrigin = originEchoesCase2[0]! as PlaceLike & {
           alternatingShow?: number | null;
           alternatingSkip?: number | null;
           alternatingStart?: number | null;
@@ -3094,6 +3488,7 @@ const App: Component = () => {
         const start = firstOrigin.alternatingStart ?? 1;
         const baseName = nextPlaceName(placesList);
         const newEchoes: { id: PlaceId; name: string }[] = [];
+        const newEchoesMirror: { id: PlaceId; name: string }[] = [];
         const localsFirst: { x: number; y: number }[] = [];
         let groupId: PlaceId | null = null;
 
@@ -3144,8 +3539,8 @@ const App: Component = () => {
           }
         }
 
-        for (let i = 0; i < originEchoes.length; i++) {
-          const originEcho = originEchoes[i]!;
+        for (let i = 0; i < originEchoesCase2.length; i++) {
+          const originEcho = originEchoesCase2[i]!;
           const local =
             localByOriginId?.get(originEcho.id) ??
             (() => {
@@ -3188,12 +3583,50 @@ const App: Component = () => {
             });
           }
         }
+        if (case2RepeaterMirrorEnabled) {
+          for (let i = 0; i < originEchoesCase2.length; i++) {
+            const origP = originEchoesCase2[i]!;
+            const origM = getMirrorPlaceForRepeaterPrimary(
+              origP.id,
+              placesList,
+            );
+            const lf = localsFirst[i];
+            if (origM == null || lf == null) continue;
+            const localMirror = { x: lf.x, y: -lf.y };
+            const echoName = `${baseName} Echo ${i + 1 + originEchoesCase2.length}`;
+            const echoNameResult = String1000.from(echoName);
+            const placeRes = evolu.insert('place', {
+              parentId: origM,
+              x: localMirror.x,
+              y: localMirror.y,
+              ...(echoNameResult.ok && { name: echoNameResult.value }),
+              ...(groupId != null && { repeaterEchoGroupId: groupId }),
+              alternatingShow: show,
+              alternatingSkip: skip,
+              alternatingStart: start,
+              isScaffolding: 1,
+            }) as { ok: true; value: { id: PlaceId } } | { ok: false };
+            if (placeRes.ok) {
+              newEchoesMirror.push({
+                id: placeRes.value.id,
+                name: echoName,
+              });
+              recordTransformation({
+                kind: 'addRelated',
+                placeId: placeRes.value.id,
+                parentId: origM,
+                x: localMirror.x,
+                y: localMirror.y,
+              });
+            }
+          }
+        }
         const newEchoesOther: { id: PlaceId; name: string }[] = [];
         let originEchoesOther: PlaceLike[] = [];
         if (
           pals.mode === 'circularRepeater' &&
-          localsFirst.length === originEchoes.length &&
-          originEchoes.length > 0
+          localsFirst.length === originEchoesCase2.length &&
+          originEchoesCase2.length > 0
         ) {
           const originSelCase2 = placesList.find(
             (p) => p.id === pals.originSelectedPlaceId,
@@ -3239,7 +3672,7 @@ const App: Component = () => {
               ? axesList.find((a) => a.id === mirrorAxisId)
               : null;
           const firstAxisNum = circularRepeaterAxisNumberForPlace(
-            originEchoes[0]!.id,
+            originEchoesCase2[0]!.id,
             placesList,
             axesList,
           );
@@ -3273,7 +3706,7 @@ const App: Component = () => {
             otherHubC2 != null &&
             mirrorAxisRow != null &&
             (mirrorAxisRow as { isMirror?: number | null }).isMirror === 1 &&
-            originEchoesOther.length === originEchoes.length &&
+            originEchoesOther.length === originEchoesCase2.length &&
             originEchoesOther.length === localsFirst.length
           ) {
             const placesAbs = placesWithAbsolutePositions();
@@ -3289,7 +3722,7 @@ const App: Component = () => {
               const originEchoOther = originEchoesOther[i]!;
               const localFirst = localsFirst[i]!;
               const absParent = getAbsolutePosition(
-                originEchoes[i]!,
+                originEchoesCase2[i]!,
                 placesList,
               );
               const rot = rotateBy(
@@ -3315,7 +3748,7 @@ const App: Component = () => {
                 reflected.x - absOtherParent.x,
                 reflected.y - absOtherParent.y,
               );
-              const echoName = `${baseName} Echo ${i + 1 + originEchoes.length}`;
+              const echoName = `${baseName} Echo ${i + 1 + originEchoesCase2.length}`;
               const echoNameResult = String1000.from(echoName);
               const placeRes = evolu.insert('place', {
                 parentId: originEchoOther.id,
@@ -3347,8 +3780,12 @@ const App: Component = () => {
         const lineName = nextLineSegmentName(lineSegments());
         const segNameResult = String1000.from(lineName);
         let firstLineSegId: LineSegmentId | null = null;
-        for (let i = 0; i < originEchoes.length && i < newEchoes.length; i++) {
-          const origEcho = originEchoes[i]!;
+        for (
+          let i = 0;
+          i < originEchoesCase2.length && i < newEchoes.length;
+          i++
+        ) {
+          const origEcho = originEchoesCase2[i]!;
           const newEcho = newEchoes[i]!;
           const endARes = evolu.insert('lineSegmentEnd', {
             placeId: origEcho.id,
@@ -3398,6 +3835,68 @@ const App: Component = () => {
                 id: endBRes.value.id,
                 name: endBName.value,
               });
+          }
+        }
+        if (
+          case2RepeaterMirrorEnabled &&
+          newEchoesMirror.length > 0 &&
+          newEchoesMirror.length === originEchoesCase2.length &&
+          firstLineSegId != null
+        ) {
+          const lineNameM = nextLineSegmentName(lineSegments());
+          const segNameResultM = String1000.from(lineNameM);
+          for (
+            let i = 0;
+            i < originEchoesCase2.length && i < newEchoesMirror.length;
+            i++
+          ) {
+            const origP = originEchoesCase2[i]!;
+            const newM = newEchoesMirror[i]!;
+            const origM = getMirrorPlaceForRepeaterPrimary(
+              origP.id,
+              placesList,
+            );
+            if (origM == null) continue;
+            const endARes = evolu.insert('lineSegmentEnd', {
+              placeId: origM,
+            });
+            const endBRes = evolu.insert('lineSegmentEnd', {
+              placeId: newM.id,
+            });
+            if (endARes.ok && endBRes.ok && segNameResultM.ok) {
+              const segRes = evolu.insert('lineSegment', {
+                endAId: endARes.value.id,
+                endBId: endBRes.value.id,
+                name: segNameResultM.value,
+                isScaffolding: 0,
+                repeaterLineSegmentEchoGroupId: firstLineSegId,
+              }) as { ok: true; value: { id: LineSegmentId } } | { ok: false };
+              if (segRes.ok) {
+                recordTransformation({
+                  kind: 'addLine',
+                  placeId: origM,
+                  lineSegmentId: segRes.value.id,
+                });
+              }
+              const placeNameAM =
+                placesList.find((p) => p.id === origM)?.name?.trim() || 'Place';
+              const endAName = String1000.from(
+                lineSegmentEndDisplayName(lineNameM, placeNameAM),
+              );
+              const endBName = String1000.from(
+                lineSegmentEndDisplayName(lineNameM, newM.name),
+              );
+              if (endAName.ok)
+                evolu.update('lineSegmentEnd', {
+                  id: endARes.value.id,
+                  name: endAName.value,
+                });
+              if (endBName.ok)
+                evolu.update('lineSegmentEnd', {
+                  id: endBRes.value.id,
+                  name: endBName.value,
+                });
+            }
           }
         }
         if (
@@ -3662,11 +4161,14 @@ const App: Component = () => {
                 axes(),
               )
             : undefined;
+        const perp = params.distanceFromAxis;
+        const onAxis = Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD;
         setPendingAddPlaceOnCircularRepeater({
           ...paRep,
           distanceAlongAxis: params.distanceAlongAxis,
-          distanceFromAxis: params.distanceFromAxis,
+          distanceFromAxis: perp,
           ...(placementAxisNumber != null && { placementAxisNumber }),
+          ...(onAxis ? { repeaterMirrorEnabled: false } : {}),
         });
       }
     }
@@ -4296,6 +4798,7 @@ const App: Component = () => {
           circularRepeaterId: repeaterId,
           distanceAlongAxis: 0,
           patternEnabled: false,
+          repeaterMirrorEnabled: false,
         });
       }
     }
@@ -4317,6 +4820,7 @@ const App: Component = () => {
               alternatingShow?: number | null;
               alternatingSkip?: number | null;
               alternatingStart?: number | null;
+              repeaterMirrorEnabled?: number | null;
             };
             const hasPattern =
               placeRow.alternatingShow != null ||
@@ -4325,6 +4829,9 @@ const App: Component = () => {
             const defaultStart =
               placeRow.alternatingStart ??
               (circularRepeaterAxisNumber(axisId, repId, axes()) || 1);
+            const canonical = places().find(
+              (p) => p.id === (place.repeaterEchoGroupId ?? place.id),
+            ) as PlaceLike | undefined;
             setPendingModifyPlaceOnCircularRepeater({
               placeId,
               circularRepeaterId: repId,
@@ -4332,6 +4839,7 @@ const App: Component = () => {
               alternatingShow: placeRow.alternatingShow ?? 1,
               alternatingSkip: placeRow.alternatingSkip ?? 1,
               alternatingStart: defaultStart,
+              repeaterMirrorEnabled: canonical?.repeaterMirrorEnabled === 1,
             });
           }
         }
@@ -4438,7 +4946,7 @@ const App: Component = () => {
     const move = pendingMove();
     const rot = pendingRotate();
     const del = pendingDeletePlaceId();
-    const placesList = places();
+    let placesList = places();
 
     const paModRep = pendingModifyPlaceOnCircularRepeater();
     if (paModRep) {
@@ -4468,10 +4976,27 @@ const App: Component = () => {
         | undefined;
       const groupId = place?.repeaterEchoGroupId;
       if (groupId != null && repAxes.length > 0) {
+        const repAxisIds = new Set(repAxes.map((a) => a.id));
+        const placeForPerp = placesList.find(
+          (p) => p.id === paModRep.placeId,
+        ) as PlaceLike | undefined;
+        const primaryForPerp =
+          placeForPerp?.repeaterMirrorOfPlaceId != null
+            ? placesList.find(
+                (q) => q.id === placeForPerp.repeaterMirrorOfPlaceId,
+              )
+            : placeForPerp;
+        const perpRef = primaryForPerp?.distanceFromAxis ?? 0;
+        const wantMirror =
+          paModRep.repeaterMirrorEnabled === true &&
+          repeaterMirrorCanEnable(perpRef);
+        if (!wantMirror) {
+          deleteRepeaterMirrorEchoRowsAndLines(groupId, placesList);
+          placesList = places();
+        }
         const groupPlaces = placesList.filter(
           (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
         );
-        const repAxisIds = new Set(repAxes.map((a) => a.id));
         const directEchoes = groupPlaces.filter(
           (p) =>
             (p as PlaceLike).parentAxisId != null &&
@@ -4487,6 +5012,9 @@ const App: Component = () => {
           );
           if (!inPatternAxisNumbers.has(axisNum)) {
             toDelete.add(p.id);
+            const mirrorPeer = groupPlaces.find(
+              (q) => (q as PlaceLike).repeaterMirrorOfPlaceId === p.id,
+            );
             const collectDescendants = (pid: PlaceId) => {
               for (const c of placesList) {
                 if ((c as { parentId?: PlaceId }).parentId === pid) {
@@ -4496,6 +5024,10 @@ const App: Component = () => {
               }
             };
             collectDescendants(p.id);
+            if (mirrorPeer) {
+              toDelete.add(mirrorPeer.id);
+              collectDescendants(mirrorPeer.id);
+            }
           }
         }
         for (const id of toDelete) {
@@ -4505,7 +5037,8 @@ const App: Component = () => {
         const referenceEcho = remainingGroup.find(
           (p) =>
             (p as PlaceLike).parentAxisId != null &&
-            repAxisIds.has((p as PlaceLike).parentAxisId!),
+            repAxisIds.has((p as PlaceLike).parentAxisId!) &&
+            (p as PlaceLike).repeaterMirrorOfPlaceId == null,
         ) as
           | (PlaceLike & {
               distanceAlongAxis?: number;
@@ -4529,7 +5062,8 @@ const App: Component = () => {
         let echoIndex = remainingGroup.filter(
           (p) =>
             (p as PlaceLike).parentAxisId != null &&
-            repAxisIds.has((p as PlaceLike).parentAxisId!),
+            repAxisIds.has((p as PlaceLike).parentAxisId!) &&
+            (p as PlaceLike).repeaterMirrorOfPlaceId == null,
         ).length;
         const modPatternFields = usePattern
           ? {
@@ -4542,6 +5076,7 @@ const App: Component = () => {
               alternatingSkip: null,
               alternatingStart: null,
             };
+        const modMirrorAngles = repeaterMirrorPlaceAngles(distFrom);
         for (const axis of repAxes) {
           const axisNum = circularRepeaterAxisNumber(
             axis.id,
@@ -4553,7 +5088,7 @@ const App: Component = () => {
           echoIndex += 1;
           const echoName = `${baseName} Echo ${echoIndex}`;
           const nameResult = String1000.from(echoName);
-          evolu.insert('place', {
+          const primaryRes = evolu.insert('place', {
             parentId: null,
             parentAxisId: axis.id,
             distanceAlongAxis: distAlong,
@@ -4564,7 +5099,27 @@ const App: Component = () => {
             ...(nameResult.ok && { name: nameResult.value }),
             isScaffolding: 1,
             ...modPatternFields,
-          });
+            ...(wantMirror && { angle: modMirrorAngles.primary }),
+          }) as { ok: true; value: { id: PlaceId } } | { ok: false };
+          if (primaryRes.ok && wantMirror) {
+            echoIndex += 1;
+            const mirrorEchoName = `${baseName} Echo ${echoIndex}`;
+            const mirrorNameResult = String1000.from(mirrorEchoName);
+            evolu.insert('place', {
+              parentId: null,
+              parentAxisId: axis.id,
+              distanceAlongAxis: distAlong,
+              distanceFromAxis: -distFrom,
+              x: 0,
+              y: 0,
+              repeaterEchoGroupId: groupId,
+              ...(mirrorNameResult.ok && { name: mirrorNameResult.value }),
+              isScaffolding: 1,
+              ...modPatternFields,
+              angle: modMirrorAngles.mirror,
+              repeaterMirrorOfPlaceId: primaryRes.value.id,
+            });
+          }
           axesWithEcho.add(axis.id);
         }
         for (const p of remainingGroup) {
@@ -4573,6 +5128,46 @@ const App: Component = () => {
             ...modPatternFields,
           });
         }
+        if (wantMirror && repeaterMirrorCanEnable(distFrom)) {
+          const liveGroup = places().filter(
+            (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+          );
+          for (const pr of liveGroup) {
+            if (
+              (pr as PlaceLike).parentAxisId == null ||
+              !repAxisIds.has((pr as PlaceLike).parentAxisId!) ||
+              (pr as PlaceLike).repeaterMirrorOfPlaceId != null
+            )
+              continue;
+            const hasMirror = liveGroup.some(
+              (q) => (q as PlaceLike).repeaterMirrorOfPlaceId === pr.id,
+            );
+            if (hasMirror) continue;
+            echoIndex += 1;
+            const fillName = `${baseName} Echo ${echoIndex}`;
+            const fillNameResult = String1000.from(fillName);
+            const prPerp = (pr as PlaceLike).distanceFromAxis ?? 0;
+            const maFill = repeaterMirrorPlaceAngles(prPerp);
+            evolu.insert('place', {
+              parentId: null,
+              parentAxisId: (pr as PlaceLike).parentAxisId!,
+              distanceAlongAxis: (pr as PlaceLike).distanceAlongAxis ?? 0,
+              distanceFromAxis: -prPerp,
+              x: 0,
+              y: 0,
+              repeaterEchoGroupId: groupId,
+              ...(fillNameResult.ok && { name: fillNameResult.value }),
+              isScaffolding: 1,
+              ...modPatternFields,
+              angle: maFill.mirror,
+              repeaterMirrorOfPlaceId: pr.id,
+            });
+          }
+        }
+        evolu.update('place', {
+          id: groupId,
+          repeaterMirrorEnabled: wantMirror ? 1 : null,
+        });
         recordTransformation({
           kind: 'modifyPlaceOnCircularRepeater',
           placeId: paModRep.placeId,
@@ -4584,6 +5179,7 @@ const App: Component = () => {
             alternatingSkip: skip,
             alternatingStart: start,
           }),
+          repeaterMirrorEnabled: wantMirror ? 1 : 0,
         });
       }
       setPendingModifyPlaceOnCircularRepeater(null);
@@ -4827,13 +5423,40 @@ const App: Component = () => {
                 y: move.y,
               });
             } else {
+              if (
+                repId != null &&
+                groupId != null &&
+                Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD
+              ) {
+                deleteRepeaterMirrorEchoRowsAndLines(groupId, places());
+                evolu.update('place', {
+                  id: groupId,
+                  repeaterMirrorEnabled: null,
+                });
+                const pm = pendingModifyPlaceOnCircularRepeater();
+                if (pm) {
+                  setPendingModifyPlaceOnCircularRepeater({
+                    ...pm,
+                    repeaterMirrorEnabled: false,
+                  });
+                }
+              }
+              const mirrorOfMoved = (place as PlaceLike)
+                .repeaterMirrorOfPlaceId;
               for (const p of toUpdate) {
                 if (p && (p as PlaceLike).parentAxisId != null) {
-                  const pPerp = mirrorSameAxis
-                    ? p.id === placeId
-                      ? perp
-                      : -perp
-                    : perp;
+                  let pPerp: number;
+                  if (mirrorSameAxis) {
+                    pPerp = p.id === placeId ? perp : -perp;
+                  } else if (
+                    (p as PlaceLike).repeaterMirrorOfPlaceId === placeId
+                  ) {
+                    pPerp = -perp;
+                  } else if (mirrorOfMoved != null && p.id === mirrorOfMoved) {
+                    pPerp = -perp;
+                  } else {
+                    pPerp = perp;
+                  }
                   evolu.update('place', {
                     id: p.id,
                     distanceAlongAxis: d,
@@ -4843,6 +5466,9 @@ const App: Component = () => {
                 }
               }
               if (repId != null && groupId != null) {
+                const canonRm = places().find((p) => p.id === groupId) as
+                  | PlaceLike
+                  | undefined;
                 recordTransformation({
                   kind: 'modifyPlaceOnCircularRepeater',
                   placeId,
@@ -4865,6 +5491,8 @@ const App: Component = () => {
                           1,
                       }
                     : {}),
+                  repeaterMirrorEnabled:
+                    canonRm?.repeaterMirrorEnabled === 1 ? 1 : 0,
                 });
                 setPendingModifyPlaceOnCircularRepeater(null);
               } else {
@@ -5771,14 +6399,19 @@ const App: Component = () => {
           : repAxes;
       });
       const patternLength = repAxesInPatternPerRepeater[0]?.length ?? 0;
+      const mirrorEffective =
+        addPlaceOnRep.repeaterMirrorEnabled === true &&
+        repeaterMirrorCanEnable(distanceFromAxis);
+      const mirrorAngles = repeaterMirrorPlaceAngles(distanceFromAxis);
       let firstPlaceId: PlaceId | null = null;
+      let echoIndex = 0;
       for (let axisIdx = 0; axisIdx < patternLength; axisIdx++) {
-        const echoIndex = axisIdx + 1;
-        const echoName = `${baseName} Echo ${echoIndex}`;
-        const nameResult = String1000.from(echoName);
         for (let repIdx = 0; repIdx < echoRepIds.length; repIdx++) {
           const axisForRep = repAxesInPatternPerRepeater[repIdx]?.[axisIdx];
           if (!axisForRep) continue;
+          echoIndex += 1;
+          const echoName = `${baseName} Echo ${echoIndex}`;
+          const nameResult = String1000.from(echoName);
           const placeRes: { ok: true; value: { id: PlaceId } } | { ok: false } =
             evolu.insert('place', {
               parentId: null,
@@ -5793,15 +6426,40 @@ const App: Component = () => {
               ...(nameResult.ok && { name: nameResult.value }),
               isScaffolding: 1,
               ...patternFields,
+              ...(mirrorEffective && {
+                angle: mirrorAngles.primary,
+              }),
             });
           if (placeRes.ok && firstPlaceId == null)
             firstPlaceId = placeRes.value.id;
+          if (placeRes.ok && mirrorEffective) {
+            echoIndex += 1;
+            const mirrorName = `${baseName} Echo ${echoIndex}`;
+            const mirrorNameResult = String1000.from(mirrorName);
+            evolu.insert('place', {
+              parentId: null,
+              parentAxisId: axisForRep.id,
+              distanceAlongAxis: addPlaceOnRep.distanceAlongAxis,
+              distanceFromAxis: -distanceFromAxis,
+              x: 0,
+              y: 0,
+              ...(firstPlaceId != null && {
+                repeaterEchoGroupId: firstPlaceId,
+              }),
+              ...(mirrorNameResult.ok && { name: mirrorNameResult.value }),
+              isScaffolding: 1,
+              ...patternFields,
+              angle: mirrorAngles.mirror,
+              repeaterMirrorOfPlaceId: placeRes.value.id,
+            });
+          }
         }
       }
       if (firstPlaceId != null) {
         evolu.update('place', {
           id: firstPlaceId,
           repeaterEchoGroupId: firstPlaceId,
+          repeaterMirrorEnabled: mirrorEffective ? 1 : null,
           ...patternFields,
         });
         recordTransformation({
@@ -5814,6 +6472,7 @@ const App: Component = () => {
             alternatingSkip: skip,
             alternatingStart: start,
           }),
+          repeaterMirrorEnabled: mirrorEffective ? 1 : 0,
         });
       }
       setPendingAddPlaceOnCircularRepeater(null);
@@ -6602,6 +7261,32 @@ const App: Component = () => {
                   .circularRepeaterId === repId,
             ).length;
           })()}
+          repeaterMirrorEnabled={
+            (transformChoice() === 'addPlaceOnCircularRepeater' &&
+              pendingAddPlaceOnCircularRepeater()?.repeaterMirrorEnabled ===
+                true) ||
+            (transformChoice() === 'modifyPlaceOnCircularRepeater' &&
+              pendingModifyPlaceOnCircularRepeater()?.repeaterMirrorEnabled ===
+                true) ||
+            false
+          }
+          repeaterMirrorCanEnable={repeaterMirrorCanEnableUI()}
+          onRepeaterMirrorChange={(enabled) => {
+            const pa = pendingAddPlaceOnCircularRepeater();
+            if (pa && transformChoice() === 'addPlaceOnCircularRepeater') {
+              setPendingAddPlaceOnCircularRepeater({
+                ...pa,
+                repeaterMirrorEnabled: enabled,
+              });
+            }
+            const pmod = pendingModifyPlaceOnCircularRepeater();
+            if (pmod && transformChoice() === 'modifyPlaceOnCircularRepeater') {
+              setPendingModifyPlaceOnCircularRepeater({
+                ...pmod,
+                repeaterMirrorEnabled: enabled,
+              });
+            }
+          }}
           bendAtEndsState={bendAtEndsState()}
           axisDirection={
             (transformChoice() === 'addAxis' ||

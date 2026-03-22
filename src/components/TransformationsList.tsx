@@ -122,9 +122,13 @@ const TransformationsList: Component = () => {
                 {t.kind === 'deleteCircularRepeater' &&
                   `Delete circular repeater at ${placeName}`}
                 {t.kind === 'addPlaceOnCircularRepeater' &&
-                  `Add place on repeater at ${placeName}`}
+                  `Add place on repeater at ${placeName}${
+                    t.repeaterMirrorEnabled === 1 ? ' (repeater mirror)' : ''
+                  }`}
                 {t.kind === 'modifyPlaceOnCircularRepeater' &&
-                  `Modify place on repeater at ${placeName}`}
+                  `Modify place on repeater at ${placeName}${
+                    t.repeaterMirrorEnabled === 1 ? ' (repeater mirror)' : ''
+                  }`}
               </li>
             );
           })}
