@@ -167,7 +167,7 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'deleteLine') return 'Delete Line';
     if (props.transformChoice === 'deleteCircularField')
       return 'Delete Circular Field';
-    if (props.transformChoice === 'rotate') return 'Rotate Place';
+    if (props.transformChoice === 'rotate') return 'Rotate';
     if (props.transformChoice === 'addCircularField')
       return 'Add Circular Field';
     if (props.transformChoice === 'bendAtEnds') return 'Bend at ends';
@@ -463,12 +463,19 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                   {props.transformChoice === 'deleteLine' && (
                     <p class={classes.guideText}>This line will be deleted.</p>
                   )}
-                  {props.transformChoice === 'rotate' && (
-                    <p class={classes.guideText}>
-                      Drag the orientation axis to rotate. Related places will
-                      rotate around this place.
-                    </p>
-                  )}
+                  {props.transformChoice === 'rotate' &&
+                    (props.selectedCircularRepeaterId ? (
+                      <p class={classes.guideText}>
+                        Drag the orientation axis at the repeater hub to change
+                        orientation. Echo repeaters in the same group rotate
+                        together; mirror echoes rotate the opposite way.
+                      </p>
+                    ) : (
+                      <p class={classes.guideText}>
+                        Drag the orientation axis to rotate. Related places will
+                        rotate around this place.
+                      </p>
+                    ))}
                   {props.transformChoice === 'addCircularField' && (
                     <p class={classes.guideText}>
                       Set center (click canvas or use existing place), then drag
@@ -609,94 +616,100 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                             }
                             class="rounded border-slate-300"
                           />
-                          <span class="text-sm">
-                            Use repetition pattern
-                          </span>
+                          <span class="text-sm">Use repetition pattern</span>
                         </label>
                       </div>
                       {props.repetitionPatternEnabled &&
                         props.alternatingPattern && (
-                        <div class="mt-3 flex flex-col gap-2">
-                          <div class="flex items-center gap-2">
-                            <label class="text-sm w-12 shrink-0" for="alt-show">
-                              Show
-                            </label>
-                            <input
-                              id="alt-show"
-                              type="number"
-                              min={1}
-                              value={props.alternatingPattern.show}
-                              onInput={(e) => {
-                                const n = Number(
-                                  (e.target as HTMLInputElement).value,
-                                );
-                                if (Number.isFinite(n) && n >= 1)
-                                  props.onAlternatingPatternChange(
-                                    n,
-                                    props.alternatingPattern!.skip,
-                                    props.alternatingPattern!.start,
+                          <div class="mt-3 flex flex-col gap-2">
+                            <div class="flex items-center gap-2">
+                              <label
+                                class="text-sm w-12 shrink-0"
+                                for="alt-show"
+                              >
+                                Show
+                              </label>
+                              <input
+                                id="alt-show"
+                                type="number"
+                                min={1}
+                                value={props.alternatingPattern.show}
+                                onInput={(e) => {
+                                  const n = Number(
+                                    (e.target as HTMLInputElement).value,
                                   );
-                              }}
-                              class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <label class="text-sm w-12 shrink-0" for="alt-skip">
-                              Skip
-                            </label>
-                            <input
-                              id="alt-skip"
-                              type="number"
-                              min={0}
-                              value={props.alternatingPattern.skip}
-                              onInput={(e) => {
-                                const n = Number(
-                                  (e.target as HTMLInputElement).value,
-                                );
-                                if (Number.isFinite(n) && n >= 0)
-                                  props.onAlternatingPatternChange(
-                                    props.alternatingPattern!.show,
-                                    n,
-                                    props.alternatingPattern!.start,
+                                  if (Number.isFinite(n) && n >= 1)
+                                    props.onAlternatingPatternChange(
+                                      n,
+                                      props.alternatingPattern!.skip,
+                                      props.alternatingPattern!.start,
+                                    );
+                                }}
+                                class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
+                              />
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <label
+                                class="text-sm w-12 shrink-0"
+                                for="alt-skip"
+                              >
+                                Skip
+                              </label>
+                              <input
+                                id="alt-skip"
+                                type="number"
+                                min={0}
+                                value={props.alternatingPattern.skip}
+                                onInput={(e) => {
+                                  const n = Number(
+                                    (e.target as HTMLInputElement).value,
                                   );
-                              }}
-                              class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <label class="text-sm w-12 shrink-0" for="alt-start">
-                              Start
-                            </label>
-                            <input
-                              id="alt-start"
-                              type="number"
-                              min={1}
-                              max={Math.max(1, props.circularRepeaterAxisCount)}
-                              value={props.alternatingPattern.start}
-                              onInput={(e) => {
-                                const n = Number(
-                                  (e.target as HTMLInputElement).value,
-                                );
-                                const max = Math.max(
+                                  if (Number.isFinite(n) && n >= 0)
+                                    props.onAlternatingPatternChange(
+                                      props.alternatingPattern!.show,
+                                      n,
+                                      props.alternatingPattern!.start,
+                                    );
+                                }}
+                                class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
+                              />
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <label
+                                class="text-sm w-12 shrink-0"
+                                for="alt-start"
+                              >
+                                Start
+                              </label>
+                              <input
+                                id="alt-start"
+                                type="number"
+                                min={1}
+                                max={Math.max(
                                   1,
                                   props.circularRepeaterAxisCount,
-                                );
-                                if (
-                                  Number.isFinite(n) &&
-                                  n >= 1 &&
-                                  n <= max
-                                )
-                                  props.onAlternatingPatternChange(
-                                    props.alternatingPattern!.show,
-                                    props.alternatingPattern!.skip,
-                                    n,
+                                )}
+                                value={props.alternatingPattern.start}
+                                onInput={(e) => {
+                                  const n = Number(
+                                    (e.target as HTMLInputElement).value,
                                   );
-                              }}
-                              class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
+                                  const max = Math.max(
+                                    1,
+                                    props.circularRepeaterAxisCount,
+                                  );
+                                  if (Number.isFinite(n) && n >= 1 && n <= max)
+                                    props.onAlternatingPatternChange(
+                                      props.alternatingPattern!.show,
+                                      props.alternatingPattern!.skip,
+                                      n,
+                                    );
+                                }}
+                                class="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
+                              />
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </>
                   )}
                   {props.transformChoice === 'deleteCircularRepeater' && (

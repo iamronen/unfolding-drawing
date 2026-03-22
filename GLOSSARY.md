@@ -803,8 +803,6 @@ This would make it possible, for example, to create different repetitions on odd
 An echo drawing object can be removed from its repeater and continue to exist as an independent drawing object, when this happens it becomes an orphan. 
 An orphaned echo drawing object does not change when any of its formerly related drawing objects are csuggesthanged. 
 
-### Circular Repeater
-A cicrular repeater generates  
 
 ## Drawing Guide
 In most drawing tools a user faces many tools and choices that can be overwhelming and complicated to use (unless you are a trained professional). 

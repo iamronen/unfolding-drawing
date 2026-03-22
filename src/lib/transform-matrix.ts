@@ -173,8 +173,12 @@ export const TRANSFORMS: readonly TransformDef[] = [
   },
   {
     id: 'rotate',
-    label: 'Rotate Place',
-    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
+    label: 'Rotate',
+    allowedSelectionTypes: [
+      'place',
+      'placeOnCircularRepeater',
+      'circularRepeater',
+    ],
   },
 ];
 

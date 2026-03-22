@@ -557,8 +557,8 @@ function PlaceTreeNode(props: {
       .filter(
         (a) =>
           a.placeId === props.place.id &&
-          (a as { circularRepeaterId?: CircularRepeaterId }).circularRepeaterId ===
-            repeaterId,
+          (a as { circularRepeaterId?: CircularRepeaterId })
+            .circularRepeaterId === repeaterId,
       )
       .sort((a, b) => Number(a.angle) - Number(b.angle));
   const placesOnAxis = (axisId: AxisId) =>
@@ -662,6 +662,7 @@ function PlaceTreeNode(props: {
       <div
         class={`${classes.listRowWithIndicator} ${classes.listItem}`}
         role="treeitem"
+        tabIndex={-1}
         aria-expanded={hasChildren ? true : undefined}
       >
         <span class={classes.listScaffoldingIndicator}>
@@ -742,7 +743,8 @@ function PlaceTreeNode(props: {
                     placeId: axis.placeId,
                     angle: Number(axis.angle),
                     isBidirectional: axis.isBidirectional ?? null,
-                    isMirror: (axis as { isMirror?: number | null }).isMirror ?? null,
+                    isMirror:
+                      (axis as { isMirror?: number | null }).isMirror ?? null,
                   }}
                   axisLabel={`Axis ${i + 1}`}
                   placesOnAxis={placesOnAxis(axis.id)}
@@ -765,7 +767,8 @@ function PlaceTreeNode(props: {
                 placeId: axis.placeId,
                 angle: Number(axis.angle),
                 isBidirectional: axis.isBidirectional ?? null,
-                isMirror: (axis as { isMirror?: number | null }).isMirror ?? null,
+                isMirror:
+                  (axis as { isMirror?: number | null }).isMirror ?? null,
               }}
               placesOnAxis={placesOnAxis(axis.id)}
               places={props.places as PlaceWithAxis[]}
@@ -906,8 +909,9 @@ const DrawingObjectsList: Component<{
                 placeId: a.placeId,
                 angle: Number(a.angle),
                 isBidirectional: a.isBidirectional,
-                circularRepeaterId: (a as { circularRepeaterId?: CircularRepeaterId })
-                  .circularRepeaterId,
+                circularRepeaterId: (
+                  a as { circularRepeaterId?: CircularRepeaterId }
+                ).circularRepeaterId,
               }))}
               circularRepeaters={circularRepeaters()}
               onSelectAxis={props.onSelectAxis ?? undefined}

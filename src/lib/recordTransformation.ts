@@ -54,11 +54,12 @@ export type RecordDelete = {
   placeId: PlaceId;
 };
 
-/** Payload for rotate place. */
+/** Payload for rotate place or circular repeater (hub + optional repeater id). */
 export type RecordRotate = {
   kind: 'rotate';
   placeId: PlaceId;
   angle: number;
+  circularRepeaterId?: CircularRepeaterId | null;
 };
 
 /** Payload for add line. */
@@ -299,6 +300,9 @@ export function recordTransformation(data: TransformationRecord): void {
         x: null,
         y: null,
         angle: data.angle,
+        ...(data.circularRepeaterId != null && {
+          circularRepeaterId: data.circularRepeaterId,
+        }),
       });
       break;
     case 'addLine':
