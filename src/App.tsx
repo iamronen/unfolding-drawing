@@ -2062,7 +2062,7 @@ const App: Component = () => {
     const tc = transformChoice();
     if (tc === 'addPlaceOnCircularRepeater') {
       const pa = pendingAddPlaceOnCircularRepeater();
-      return pa ? repeaterMirrorCanEnable(pa.distanceFromAxis) : false;
+      return !!pa;
     }
     if (tc === 'modifyPlaceOnCircularRepeater') {
       const pm = pendingModifyPlaceOnCircularRepeater();
@@ -2995,13 +2995,11 @@ const App: Component = () => {
             )
           : undefined;
       const perp0 = params.distanceFromAxis;
-      const onAxis0 = Math.abs(perp0) <= AXIS_MAGNETIC_THRESHOLD;
       setPendingAddPlaceOnCircularRepeater({
         ...paRep,
         distanceAlongAxis: params.distanceAlongAxis,
         distanceFromAxis: perp0,
         ...(placementAxisNumber != null && { placementAxisNumber }),
-        ...(onAxis0 ? { repeaterMirrorEnabled: false } : {}),
       });
       setDraggingPlaceOnCircularRepeater(paRep.circularRepeaterId);
       return;
@@ -4463,13 +4461,11 @@ const App: Component = () => {
               )
             : undefined;
         const perp = params.distanceFromAxis;
-        const onAxis = Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD;
         setPendingAddPlaceOnCircularRepeater({
           ...paRep,
           distanceAlongAxis: params.distanceAlongAxis,
           distanceFromAxis: perp,
           ...(placementAxisNumber != null && { placementAxisNumber }),
-          ...(onAxis ? { repeaterMirrorEnabled: false } : {}),
         });
       }
     }
@@ -5733,24 +5729,6 @@ const App: Component = () => {
                 y: move.y,
               });
             } else {
-              if (
-                repId != null &&
-                groupId != null &&
-                Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD
-              ) {
-                deleteRepeaterMirrorEchoRowsAndLines(groupId, places());
-                evolu.update('place', {
-                  id: groupId,
-                  repeaterMirrorEnabled: null,
-                });
-                const pm = pendingModifyPlaceOnCircularRepeater();
-                if (pm) {
-                  setPendingModifyPlaceOnCircularRepeater({
-                    ...pm,
-                    repeaterMirrorEnabled: false,
-                  });
-                }
-              }
               const mirrorOfMoved = (place as PlaceLike)
                 .repeaterMirrorOfPlaceId;
               for (const p of toUpdate) {

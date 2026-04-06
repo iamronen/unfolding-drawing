@@ -6,21 +6,21 @@ import type {
 } from '../src/lib/evolu-db.ts';
 import {
   collectLineSegmentIdsForPlaces,
-  REPEATER_MIRROR_OFF_AXIS_THRESHOLD,
   repeaterMirrorCanEnable,
   repeaterMirrorPlaceAngles,
 } from '../src/lib/repeaterPlaceMirror.ts';
 
-test('repeaterMirrorCanEnable: off-axis', (t) => {
-  t.ok(repeaterMirrorCanEnable(REPEATER_MIRROR_OFF_AXIS_THRESHOLD + 1));
-  t.ok(repeaterMirrorCanEnable(-(REPEATER_MIRROR_OFF_AXIS_THRESHOLD + 1)));
+test('repeaterMirrorCanEnable: finite perpendicular offset', (t) => {
+  t.ok(repeaterMirrorCanEnable(0));
+  t.ok(repeaterMirrorCanEnable(16));
+  t.ok(repeaterMirrorCanEnable(-50));
+  t.ok(repeaterMirrorCanEnable(0.001));
 });
 
-test('repeaterMirrorCanEnable: on-axis or null', (t) => {
-  t.absent(repeaterMirrorCanEnable(0));
-  t.absent(repeaterMirrorCanEnable(REPEATER_MIRROR_OFF_AXIS_THRESHOLD));
+test('repeaterMirrorCanEnable: null, undefined, or non-finite', (t) => {
   t.absent(repeaterMirrorCanEnable(null));
   t.absent(repeaterMirrorCanEnable(undefined));
+  t.absent(repeaterMirrorCanEnable(Number.NaN));
 });
 
 test('repeaterMirrorPlaceAngles: opposite signs for pair', (t) => {

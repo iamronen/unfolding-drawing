@@ -1,14 +1,15 @@
 import type { LineSegmentEndId, LineSegmentId, PlaceId } from './evolu-db';
 import { mirrorEchoPlaceAngles } from './mirrorEchoGeometry.ts';
 
-/** Same as AXIS_MAGNETIC_THRESHOLD in App: off-axis means mirror option is available. */
-export const REPEATER_MIRROR_OFF_AXIS_THRESHOLD = 16;
-
+/**
+ * Whether repeater mirror is allowed for a given perpendicular offset from the axis.
+ * On-axis (0) and off-axis both allow mirror; only unknown/null distance disables it.
+ */
 export function repeaterMirrorCanEnable(
   distanceFromAxis: number | null | undefined,
 ): boolean {
   if (distanceFromAxis == null) return false;
-  return Math.abs(distanceFromAxis) > REPEATER_MIRROR_OFF_AXIS_THRESHOLD;
+  return Number.isFinite(distanceFromAxis);
 }
 
 /**

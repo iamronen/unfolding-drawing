@@ -742,13 +742,14 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                           class="rounded border-slate-300"
                         />
                         <span class="text-sm">
-                          Mirror across closest repeater axis (doubles the echo
-                          group when off-axis)
+                          Mirror across closest repeater axis (adds a mirrored
+                          echo on each arm; when off-axis this doubles the echo
+                          count)
                         </span>
                       </label>
                       <p class="text-xs text-slate-500">
-                        Available when the place is off the axis line; on-axis
-                        positions disable this option.
+                        On-axis, mirrored echoes share the same position but can
+                        differ in local angle (e.g. for line direction).
                       </p>
                     </div>
                   )}
